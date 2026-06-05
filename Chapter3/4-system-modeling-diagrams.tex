@@ -1,0 +1,356 @@
+\section{System Modeling \& Diagrams}
+\subsection{Event Table}
+
+\small 
+\setlength{\tabcolsep}{4pt} 
+\renewcommand{\arraystretch}{1.5} 
+
+\begin{xltabular}{\textwidth}{|>{\centering\arraybackslash}p{0.7cm}|Y|Y|>{\centering\arraybackslash}p{1.7cm}|Y|Y|>{\centering\arraybackslash}p{1.8cm}|}
+    \hline
+    \textbf{\#} & \centering\textbf{EVENT NAME} & \centering\textbf{TRIGGER} & \textbf{SOURCE} & \centering\textbf{USE CASE} & \centering\textbf{RESPONSE} & \textbf{DEST.} \\ \hline
+    \endfirsthead 
+
+    1 & Developer login to the system & 
+    \begin{tabitem}
+        \item Developer's Info
+        \item Login request
+    \end{tabitem} & Developer & Login Developer & 
+    \begin{tabitem}
+        \item Show dashboard
+        \item Error if login fails
+    \end{tabitem} & Developer \\ \hline
+    
+    2 & Developer Update profile & 
+    \begin{tabitem}
+        \item Developer Id
+        \item Details info
+    \end{tabitem} & Developer & Update profile & 1. Updated profile & Developer \\ \hline
+    
+    3 & Developer creates a new project & 
+    \begin{tabitem}
+        \item New Project Request
+        \item Details (name, DB)
+    \end{tabitem} & Developer & Create a new Project & 
+    \begin{tabitem}
+        \item Nav to Schema Tab
+        \item Save project records
+    \end{tabitem} & Developer \\ \hline
+    
+    4 & Developer deletes project & 1. Project Id & Developer & Delete Exist Project & 1. Updated List of projects & Developer \\ \hline
+    
+    5 & Create project schema & 
+    \begin{tabitem}
+        \item Schema Gen. request
+        \item Natural language
+    \end{tabitem} & Developer & Create Schema & 1. Visualize Generated Schema & Developer \\ \hline
+    
+    6 & Developer modifies Entities & 
+    \begin{tabitem}
+        \item Entities info
+        \item Create/Edit Entities
+    \end{tabitem} & Developer & Modify Entities & 
+    \begin{tabitem}
+        \item Query response msg
+        \item Update Entity in DB
+    \end{tabitem} & Developer \\ \hline
+    
+    7 & Developer executes query & 
+    \begin{tabitem}
+        \item Query statement
+        \item Project Id
+    \end{tabitem} & Developer & Execute Query & 
+    \begin{tabitem}
+        \item Query response msg
+        \item Show results
+    \end{tabitem} & Developer \\ \hline
+    
+    8 & Developer modifies data & 
+    \begin{tabitem}
+        \item CRUD request
+        \item Project Id
+    \end{tabitem} & Developer & CRUD operations & 
+    \begin{tabitem}
+        \item Response message
+        \item Updated DB
+    \end{tabitem} & Developer \\ \hline
+    
+    
+    9 & Developer Requests Restore & 1. Restore Request (Select Point-in-Time) & Developer & Restore Project & 1. Restore requested backup & Developer \\ \hline
+    
+    10 & Developer Upgrades Tier & 1. Subscription Change Request & Developer & Manage Subscription & 1. Update Tenant Quotas & Developer \\ \hline
+
+    11 & Developer forgets password & 
+    \begin{tabitem}
+        \item Email address
+        \item Reset request
+    \end{tabitem} & Developer & Forget Password & 
+    \begin{tabitem}
+        \item Send reset link
+        \item Update password
+    \end{tabitem} & Developer \\ \hline
+    
+    12 & Developer deletes account & 
+    \begin{tabitem}
+        \item Delete request
+        \item Verification
+    \end{tabitem} & Developer & Delete Account & 1. Permanent deletion of data & Developer \\ \hline
+
+\caption{System Event Table}
+\label{table:system_event_table}
+\end{xltabular}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%           Activity Diagrams           %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Activity Diagrams}
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth]{images/activity/register_activity_diagram.png}
+        \caption{Register activity diagram}
+        \label{fig:register_activity}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth]{images/activity/login_activity_diagram.png}
+        \caption{Login activity diagram}
+        \label{fig:login_activity}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth]{images/activity/login_with_gmail_activity.png}
+        \caption{Login with g-mail activity diagram}
+        \label{fig:login_with_gmail_activity}
+    \end{figure}
+    
+   \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth]{images/activity/create_project_activity.png}
+        \caption{Create project activity diagram}
+        \label{fig:create_project_activity}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth]{images/activity/create_schema_activity.jpeg}
+        \caption{Create schema activity diagram}
+        \label{fig:create_schema_activity}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth]{images/activity/delete_project_activity.jpeg}
+        \caption{Delete project activity diagram}
+        \label{fig:delete_project_activity}
+    \end{figure}
+    
+   \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth]{images/activity/delete_rows_activity.jpeg}
+        \caption{Delete rows activity diagram}
+        \label{fig:delete_rows_activity}
+    \end{figure}
+    
+   \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth]{images/activity/execute_query_activity.png}
+        \caption{Execute SQL query activity diagram}
+        \label{fig:execute_query_activity}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth]{images/activity/create-edit-table.png}
+        \caption{Create \& edit SQL table activity diagram}
+        \label{fig:create_edit_table_activity}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth]{images/activity/delete-table.png}
+        \caption{Delete SQL table activity diagram}
+        \label{fig:delete_table_activity}
+    \end{figure}
+
+     \begin{figure}[H]
+        \centering
+        \includegraphics[height=0.95\textheight]{images/activity/modify_entity(NoSQL)_activity.jpeg}
+        \caption{Modify entity (NOSQL) activity diagram}
+        \label{fig:modify_entity_nosql_activity}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth]{images/activity/insert_update_row_activity.jpeg}
+        \caption{Insert row(s) activity diagram}
+        \label{fig:insert_row_activity}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[height=0.95\textheight]{images/activity/reset_password_activity.png}
+        \caption{Reset password activity diagram}
+        \label{fig:reset_password_activity}
+    \end{figure}
+
+\subsection{Use case}
+   \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth]{images/usecase/usecase.png}
+        \caption{Use case diagram}
+        \label{fig:usecase_diagram}
+    \end{figure}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%           Sequence Diagrams           %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Sequence Diagrams}
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/register_sequence.png}
+        \caption{Register sequence diagram}
+        \label{fig:register_sequence}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/login.png}
+        \caption{Login sequence diagram}
+        \label{fig:login_sequence}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/Oauth_sequence.png}
+        \caption{Outh sequence diagram}
+        \label{fig:oauth_sequence}
+    \end{figure}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/create_project_seq.png}
+        \caption{Create project sequence diagram}
+        \label{fig:create_project_sequence}
+    \end{figure}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/create_schema_seq.png}
+        \caption{Create schema sequence diagram}
+        \label{fig:create_schema_sequence}
+    \end{figure}
+    
+   \begin{figure}[H]
+        \centering
+        \includegraphics[height=0.90\textheight]{images/sequence/execute_query_sequence.png}
+        \caption{Execute SQL query sequence diagram}
+        \label{fig:execute_query_sequence}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/create_table.png}
+        \caption{Create table sequence diagram}
+        \label{fig:create_table_sequence}
+    \end{figure}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/03-AdminAuthorization.png}
+        \caption{Admin authorization sequence diagram}
+        \label{fig:admin_authorization_sequence}
+    \end{figure}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/04-AdminReadUsers.png}
+        \caption{Admin read users sequence diagram}
+        \label{fig:admin_read_users_sequence}
+    \end{figure}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/05-AdminUpdateUsers.png}
+        \caption{Admin update users sequence diagram}
+        \label{fig:admin_update_users_sequence}
+    \end{figure}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/06-AdminDeleteUsers.png}
+        \caption{Admin delete users sequence diagram}
+        \label{fig:admin_delete_users_sequence}
+    \end{figure}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/07-AdminSelfManagement.png}
+        \caption{Admin self management sequence diagram}
+        \label{fig:admin_self_management_sequence}
+    \end{figure}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/08-UserAuthorization.png}
+        \caption{User authorization sequence diagram}
+        \label{fig:user_authorization_sequence}
+    \end{figure}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/09-UserForbiddenOps.png}
+        \caption{User forbidden operations sequence diagram}
+        \label{fig:user_forbidden_operations_sequence}
+    \end{figure}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/10-UserSelfMangement.png}
+        \caption{User self mangement sequence diagram}
+        \label{fig:user_self_management_sequence}
+    \end{figure}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/11-UserSelfDelete.png}
+        \caption{User self delete sequence diagram}
+        \label{fig:user_self_delete_sequence}
+    \end{figure}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/restore_project.pdf}
+        \caption{Restore project sequence diagram}
+        \label{fig:restore_project_sequence}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/reset_password_sequence.png}
+        \caption{Reset password sequence diagram}
+        \label{fig:reset_password_sequence}
+    \end{figure}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/signout_seq.pdf}
+        \caption{Signout sequence diagram}
+        \label{fig:signout_sequence}
+    \end{figure}
+    
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/update_ profile_seq.pdf}
+        \caption{Update profile sequence diagram}
+        \label{fig:update_profile_sequence}
+    \end{figure} 
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1\linewidth ]{images/sequence/forget_password_seq.pdf}
+        \caption{Forget password sequence diagram}
+        \label{fig:forget_password_sequence}
+    \end{figure}

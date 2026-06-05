@@ -1,0 +1,28 @@
+% ----------------------------------------------------
+% Main LaTeX File for Graduation Project Book
+% ----------------------------------------------------
+
+\documentclass[12pt,a4paper,oneside]{report}
+
+\input{Preamble/packages}
+\input{Preamble/formatting}
+
+
+%Lets begin the document, some chapters have examples in to give you an idea 
+\begin{document}
+\include{Preamble/Frontpage}
+\include{Preamble/Acknowledgments}
+\include{Preamble/Abstract}
+
+
+\include{Preamble/toc}
+\begingroup \let\clearpage\relax \listoffigures \listoftables \endgroup
+\include{Chapter1/Chapter1}
+\include{Chapter2/Chapter2}
+\include{Chapter3/Chapter3}
+\include{Chapter4/Chapter4}
+
+\bibliographystyle{IEEEtran}    % IEEE style
+\nocite{*}
+\bibliography{references}
+\end{document}

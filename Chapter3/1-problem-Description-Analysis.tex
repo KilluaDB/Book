@@ -1,0 +1,61 @@
+\section{Problem Description \& Analysis}
+
+The rapid evolution of software development has placed data at the core of modern applications, necessitating robust Database Management Systems (DBMS). However, the current landscape presents significant friction for developers, particularly students and early-stage engineers. The problem can be decomposed into five distinct areas: workflow fragmentation, high learning barriers, lack of intelligent assistance, infrastructure overhead, and vendor lock-in risks.
+
+\subsection{Fragmentation of the Development Ecosystem}
+
+A primary challenge facing developers is the diversity of database technologies. Modern applications often require a mix of Relational (SQL) databases such as PostgreSQL and NoSQL databases such as MongoDB to handle different data structures. Managing these disparate systems forces developers to rely on a fragmented ecosystem of standalone tools.
+
+\begin{itemize}
+    \item \textbf{Context Switching:} Developers must frequently switch between different environments for schema design, query execution, data manipulation, and cloud hosting.
+    \item \textbf{Tool Isolation:} SQL and NoSQL databases typically possess unique configurations, syntaxes, and interfaces that do not interoperate.
+    \item \textbf{Operational Inefficiency:} This lack of integration introduces unnecessary overhead, slows development cycles, and increases the likelihood of inconsistencies and errors. Current cloud offerings focus primarily on hosting rather than providing a fully integrated development workspace that combines schema visualization and query editing in one cohesive environment.
+\end{itemize}
+
+\subsection{High Learning Curve and Complexity}
+
+For students and entry-level developers, the complexity of traditional database management is a significant barrier to entry.
+
+\begin{itemize}
+    \item \textbf{Configuration Burden:} Setting up and maintaining database environments requires substantial technical knowledge regarding installation, configuration, and resource management.
+    \item \textbf{Syntax \& Structure:} Beginners often struggle to understand complex schema relationships and query syntaxes without intuitive, visual aids. Existing tools often fail to provide integrated support for schema visualization or semi-automated schema generation, forcing users to invest substantial time just to operate the system.
+\end{itemize}
+
+\subsection{Absence of Context-Aware AI Assistance}
+
+While Artificial Intelligence has transformed many aspects of software engineering, it remains underutilized in database management tools.
+
+\begin{itemize}
+    \item \textbf{Manual Query Formulation:} Developers frequently waste time writing repetitive queries or attempting to decipher complex joins and aggregation pipelines manually.
+    \item \textbf{LLM Agent-Powered Schema Generation:} Existing platforms rarely leverage autonomous LLM agents to analyze database content and generate or infer schema structures automatically. Such agents can interpret natural language requests (e.g., ``show customers who purchased X'') and translate them into structured queries, provide schema visualizations, and suggest optimized relationships between tables or collections.
+    \item \textbf{Schema Understanding:} Developers dealing with unfamiliar or large datasets often lack intelligent tools to explain the relationships between tables or collections. LLM agents can act as interactive assistants, generating schemas, highlighting dependencies, and providing explanations for complex structures, reducing cognitive load.
+\end{itemize}
+
+\subsection{Infrastructure Management and Cost Overhead}
+
+Traditional on-premise database management imposes heavy burdens regarding Capital Expenditure (CAPEX) and specialized labor.
+
+\begin{itemize}
+    \item \textbf{Operational Burden:} Managing database infrastructure requires significant investment in hardware, software licensing, and specialized staff for maintenance, backups, and patching.
+    \item \textbf{Resource Inefficiency:} Traditional models often lead to over-provisioning, where organizations purchase excess capacity for hypothetical future needs, resulting in waste.
+    \item \textbf{Complexity of Scale:} As data grows, manual scaling becomes complex and error-prone. While DBaaS mitigates this by converting CAPEX to OPEX, setup on hyperscale providers can still be expensive and difficult for Small and Medium Enterprises (SMEs) to configure correctly.
+\end{itemize}
+
+\subsection{Vendor Lock-In and Deployment Rigidity}
+
+Reliance on major hyperscale providers such as AWS, Azure, and Google Cloud introduces strategic risks.
+
+\begin{itemize}
+    \item \textbf{Ecosystem Traps:} Hyperscalers often design services as walled gardens, making it difficult to migrate workloads or data due to proprietary APIs and high egress fees.
+    \item \textbf{Lack of Portability:} Deep integration with a specific vendor ecosystem restricts organizational flexibility.
+    \item \textbf{Cost Unpredictability:} Complex pricing models and hidden fees make monthly IT budgeting difficult.
+    \item \textbf{Multi-Cloud Need:} There is growing demand for cloud-agnostic architectures using containerization technologies such as Docker and Kubernetes to avoid lock-in risks.
+\end{itemize}
+
+\subsection{Technical Trade-offs: Virtualization vs. Containerization}
+
+From a system architecture perspective, hosting databases introduces technical trade-offs. Containers offer lightweight and fast deployment suitable for PaaS and SaaS platforms but pose challenges in I/O performance isolation compared to Virtual Machines (VMs). The system design must optimize database performance within containerized environments while maintaining reliability and deployment agility.
+
+\subsection{Summary of the Problem Gap}
+
+The market lacks a unified, AI-powered DBaaS platform that supports both SQL and NoSQL models while providing a low-code or no-code interface for schema design. Existing solutions such as AWS RDS, Supabase, and MongoDB Atlas typically specialize in a single database model or focus primarily on infrastructure rather than developer experience and AI-driven accessibility. This project addresses this gap by integrating LLM-agent-powered schema generation and visualization into a single, cohesive solution.

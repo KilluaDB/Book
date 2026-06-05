@@ -1,0 +1,95 @@
+% ----------------------------------------------------
+% Formatting File – Styling, Titles, Headers/Footers
+% ----------------------------------------------------
+
+% \setlength{\parindent}{1.5em}
+
+% ====================================================
+% HEADER & FOOTER (Fancyhdr)
+% ====================================================
+\setlength{\headheight}{14.5pt}  % ADD THIS LINE to fix the warning
+\addtolength{\topmargin}{-2.5pt} % ADD THIS LINE to compensate
+
+\fancyhf{} % clear
+
+\fancypagestyle{mydefault}{%
+    \fancyhf{} % clear
+
+    % Right header: Chapter Title (uppercase disabled)
+    \fancyhead[R]{\textbf{\nouppercase{\leftmark}}}
+    \renewcommand{\headrulewidth}{0.4pt}
+    
+    % Right footer: Title
+    \fancyfoot[L]{\textbf{\nouppercase{\rightmark}}}
+    
+    % Right footer: page number
+    \fancyfoot[R]{\thepage}
+    \renewcommand{\footrulewidth}{0.4pt}
+
+}
+
+% Apply the style globally
+\pagestyle{mydefault}
+
+% Format of chapter marks
+\renewcommand{\chaptermark}[1]{%
+    \markboth{Chapter \thechapter: #1}{#1}
+}
+
+% Remove section marks
+\renewcommand{\sectionmark}[1]{}
+
+% Ensure plain pages (chapter starting pages, etc.) also use our style
+\fancypagestyle{plain}{\pagestyle{mydefault}}
+
+% ====================================================
+% TABLE OF CONTENTS STYLING
+% ====================================================
+
+\setlength{\cftbeforechapskip}{1em}
+\renewcommand{\cftchapfont}{\bfseries}
+\renewcommand{\cfttoctitlefont}{\Huge\bfseries}
+
+% \makeatletter
+% \setlength{\cftchapnumwidth}{0pt}  % Remove space for chapter numbers
+% \renewcommand{\cftchappresnum}{\begin{lrbox}{\@tempboxa}}  % Hide chapter numbers
+% \renewcommand{\cftchapaftersnum}{\end{lrbox}}
+% \makeatother
+
+% ====================================================
+% CHAPTER TITLE FORMATTING
+% ====================================================
+
+% \titleformat{\chapter}[display]
+%   {\Huge\bfseries}     % format for label and title
+%   {}                    % label (empty - no "Chapter X")
+%   {0pt}                 % separation between label and title
+%   {\vspace{-50pt}}      % code before title (negative space to hide it)
+% \titlespacing*{\chapter}{0pt}{0pt}{0pt}
+
+% \titleformat{\chapter}[display]
+%   {}     % format
+%   {}     % label
+%   {0pt}  % sep
+%   {\vspace*{-\topskip}\vspace*{-\baselineskip}}  % hide everything
+% \titlespacing*{\chapter}{0pt}{-50pt}{0pt}
+
+% Patch to reduce default chapter vertical space
+% \makeatletter
+% \patchcmd{\chapter}
+%   {\thispagestyle{plain}\vspace*{50pt}} % find this part
+%   {\thispagestyle{plain}\vspace*{0pt}}  % replace 50pt with 0
+%   {}{}
+% \makeatletter
+
+\makeatletter
+\renewcommand{\@makechapterhead}[1]{%
+  % This does nothing - completely suppresses the chapter heading
+}
+\makeatother
+
+\titlespacing*{\chapter}{0pt}{0pt}{0pt}
+
+\newenvironment{tabitem}{%
+  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}%
+  {\end{itemize}}

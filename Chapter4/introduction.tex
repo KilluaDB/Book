@@ -1,0 +1,163 @@
+
+\section{System Architecture}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    box/.style={rectangle, draw, minimum width=3.2cm, minimum height=1.2cm, align=center, rounded corners},
+    smallbox/.style={rectangle, draw, minimum width=2.4cm, minimum height=0.9cm, align=center, rounded corners, font=\small},
+    container/.style={rectangle, draw, dashed, minimum width=2cm, minimum height=0.8cm, align=center, font=\footnotesize},
+    arrow/.style={->, thick, >=stealth},
+    darrow/.style={<->, thick, >=stealth}
+]
+    % Client Layer
+    \node[box, fill=blue!20] (flutter) at (-1.5,6) {Flutter\\Frontend};
+    \node[smallbox, fill=blue!10] (web) at (-5.5,6) {Web\\Browser};
+    \node[smallbox, fill=blue!10] (mobile) at (2.5,6) {Mobile\\App};
+    
+    % API Gateway Layer - Wider
+    \node[box, fill=green!30, minimum width=11cm, minimum height=2.3cm] (backend) at (-1.5,3.5) {};
+    \node at (-1.5,4.2) {\textbf{Go Backend API Server}};
+    \node[smallbox, fill=green!15] (handlers) at (-5,3) {Handlers};
+    \node[smallbox, fill=green!15] (services) at (-1.5,3) {Services};
+    \node[smallbox, fill=green!15] (repos) at (2,3) {Repositories};
+    
+    % Middle Layer - Docker Host, Orchestrator, and Platform DB on same line
+    \node[box, fill=gray!20, minimum width=6.5cm, minimum height=2.2cm] (dockerhost) at (-7,0.5) {};
+    \node at (-7,1.3) {\textbf{Docker Host}};
+    \node[container, fill=yellow!30] (db1) at (-9,0.2) {PSQL\\Container 1};
+    \node[container, fill=yellow!30] (db2) at (-7,0.2) {PSQL\\Container 2};
+    \node[container, fill=yellow!30] (db3) at (-5,0.2) {PSQL\\Container N};
+    
+    \node[box, fill=orange!25, minimum width=3.5cm] (orchestrator) at (1,0.5) {Orchestrator\\(Go Package)};
+    \node[box, fill=purple!20] (platformdb) at (5.5,0.5) {PostgreSQL\\Platform DB};
+    
+    % Bottom Layer - Redis in center
+    \node[box, fill=red!20] (redis) at (0,-2) {Redis\\Cache \& Sessions};
+    
+    % Arrows - Client to Backend
+    \draw[arrow] (flutter) -- (backend) node[midway, right, font=\small] {REST/JSON};
+    \draw[arrow] (web) -- (flutter);
+    \draw[arrow] (mobile) -- (flutter);
+    
+    % Internal Backend arrows
+    \draw[arrow] (handlers) -- (services);
+    \draw[arrow] (services) -- (repos);
+    
+    % Backend to Orchestrator (library import)
+    \draw[darrow, dashed] (services) -- (orchestrator) node[midway, right, font=\footnotesize] {Go Import};
+    
+    % Backend to Data stores
+    \draw[arrow] (repos) -- (platformdb) node[midway, right, font=\small] {pgx};
+    
+    % Orchestrator to Docker and Redis
+    \draw[arrow] (orchestrator) -- (dockerhost) node[midway, below, font=\footnotesize] {Docker API};
+    \draw[arrow] (orchestrator) -- (redis);
+    
+    % Backend to User DBs
+    \draw[arrow] (services.south) -- (db3.north) node[pos=0.35, left, font=\small] {Dynamic Conn};
+    
+\end{tikzpicture}
+\caption{High-Level System Architecture}
+\label{fig:architecture}
+\end{figure}
+
+
+\begin{itemize}
+    \item \textbf{Service Decomposition}: Functionality is divided into loosely coupled services (backend API, orchestrator, database instances)
+    
+    \item \textbf{Single Responsibility}: Each component has a well-defined purpose (separation of concerns)
+    
+    \item \textbf{API-first Design}: Services communicate through well-defined interfaces (REST APIs)
+\end{itemize}
+
+    
+
+
+\section{Technologies Used}
+
+The DBaaS platform relies on a modern and scalable technology stack to support efficient database
+management. Although the system consists of multiple components developed by different team members,
+this subsection focuses on the technologies related to the frontend layer and its integration with
+backend and AI services.
+
+\subsubsection{Flutter}
+
+Flutter is a UI development framework created by Google that enables the development of cross-platform
+applications using a single codebase. It was selected for the DBaaS frontend due to several key
+advantages:
+
+\begin{itemize}
+    \item \textbf{Cross-Platform Capability:} Enables building web-based applications without the need
+    for separate platform-specific implementations.
+    \item \textbf{Rapid Development Cycle:} The hot reload feature allows instant visualization of UI
+    changes, accelerating development and debugging.
+    \item \textbf{Flexible and Reusable Widgets:} Provides a wide range of customizable widgets for
+    building dashboards, tables, and interactive forms.
+    \item \textbf{Backend Communication:} Supports seamless interaction with RESTful and GraphQL APIs
+    for executing database operations.
+    \item \textbf{Responsive Design:} Ensures consistent user experience across different screen sizes
+    and devices.
+\end{itemize}
+
+\subsubsection{Backend Technologies}
+
+\textbf{Golang for Backend Development}
+
+The selection of Go as the primary implementation language is justified by several theoretical and practical considerations:
+
+\begin{enumerate}
+    \item \textbf{Concurrency Model}: Go's goroutines implement lightweight threads (green threads) multiplexed onto OS threads by the Go runtime. This M:N threading model provides efficient concurrent execution without the overhead of OS-level thread management.
+    
+    \item \textbf{Memory Safety}: Go's garbage collector prevents common memory errors (dangling pointers, buffer overflows) while maintaining performance through generational and concurrent collection algorithms.
+    
+    \item \textbf{Static Typing}: Compile-time type checking prevents entire classes of runtime errors, improving system reliability.
+    
+    \item \textbf{Compiled Execution}: Ahead-of-time compilation to native machine code provides performance comparable to C/C++ while maintaining higher-level abstractions.
+\end{enumerate}
+
+\textbf{Containerization with Docker}
+
+Docker was selected over alternatives (LXC, rkt, Podman) based on:
+
+\begin{itemize}
+    \item Industry standard with extensive tooling and ecosystem
+    \item Well-documented API for programmatic container management
+    \item Mature implementation of Linux namespaces and cgroups
+    \item Wide platform support and community knowledge base
+\end{itemize}
+
+\textbf{PostgreSQL as Database Engine}
+
+PostgreSQL was chosen for tenant databases due to:
+
+\begin{itemize}
+    \item ACID compliance ensuring data consistency and durability
+    \item MVCC (Multi-Version Concurrency Control) enabling high concurrency
+    \item Rich SQL compliance and extensibility
+    \item Small footprint in Alpine Linux containers (~200MB)
+\end{itemize}
+
+\textbf{Redis for State Persistence}
+
+Redis serves as the persistence layer for orchestrator metadata based on:
+
+\begin{itemize}
+    \item In-memory architecture providing O(1) lookup complexity
+    \item Persistence mechanisms (RDB/AOF) for durability
+    \item Atomic operations preventing race conditions
+    \item Simplicity compared to distributed databases
+\end{itemize}
+
+
+\subsubsection{Cloud and DevOps}
+
+To ensure scalability, reliability, and efficient deployment, the system adopts modern cloud and
+DevOps technologies:
+
+\begin{itemize}
+    \item \textbf{Docker:} Used for containerizing application components to ensure consistency across
+    development and production environments.
+    \item \textbf{AWS / GCP:} Cloud platforms used to securely host application services, user data,
+    and database resources.
+    \item \textbf{Git and GitHub:} Used for version control, collaboration, and team-based development.
+\end{itemize}

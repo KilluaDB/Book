@@ -1,0 +1,100 @@
+\section{Background}
+% ====================================================
+% Learning About DBaaS Systems
+% ====================================================
+\subsection{Learning About DBaaS Systems}
+Database-as-a-Service (DBaaS) represents a novel paradigm inspired by cloud computing principles \cite{Comparison_of_dbaas_architectures}. It is defined as a cloud service responsible for managing the underlying infrastructure and resources required by cloud databases \cite{Impact_of_Performance_Metrics_on_Database_Speedup_in_DBaaS}. DBaaS enables organizations, whether large enterprises or small businesses, to rely on flexible and reliable data storage services. The model shifts the burden of managing the Database Management System (DBMS) and data storage away from a client-server architecture—where the data owner controls these elements—to a third-party cloud architecture \cite{Impact_of_Performance_Metrics_on_Database_Speedup_in_DBaaS}.
+
+In the DBaaS environment, the provider assumes responsibility for crucial administrative and maintenance tasks, including maintaining the database software, resource management, backup/restore, high availability, and point-in-time recovery of the service \cite{Solver_in_the_loop_cluster_resource_management_for_DBaaS}. This structure obviates the need for customers to purchase costly hardware and software, handle upgrades, or employ professionals for administrative roles \cite{Comparison_of_dbaas_architectures}.
+
+% ====================================================
+% Understanding DBaaS Concepts
+% ====================================================
+\subsection{Understanding DBaaS Concepts}
+A foundational concept in DBaaS is multi-tenancy, which describes the design principle within the cloud for sharing computing resources among multiple, concurrent tenants. DBaaS providers implement various architectures to enable this dynamic resource sharing, aiming to reduce costs and enhance flexibility \cite{Comparison_of_dbaas_architectures}.
+
+The architectural landscape of DBaaS is primarily categorized based on the degree of multi-tenancy—the layer at which resources are shared:
+
+\begin{enumerate}[label=\alph*)]
+    \item \textbf{Separate database (Virtual Multi-Tenancy)}\\
+    This is the simplest strategy, achieving a high level of isolation, typically at the virtualization layer. Each tenant receives a database in an isolated virtual machine (VM), as exemplified by Amazon AWS. This approach abstracts the installation and configuration of the database system from the user. However, requiring a separate operating system for each deployed database can lead to higher resource consumption compared to containerization \cite{Comparison_of_dbaas_architectures}.
+
+    \item \textbf{Shared database, separate schema}\\
+    This architecture achieves a higher degree of multi-tenancy, where multiple tenants share the underlying database system, but isolation is maintained through dedicated schemas for each tenant. Providers benefit from lower costs through efficient resource consumption and reduced maintenance, and they may serve multiple tenants with fewer database licenses \cite{Comparison_of_dbaas_architectures}.
+
+    \item \textbf{Shared database, shared schema (Organic Multi-Tenancy)}\\
+     Also referred to as the shared everything architecture, this represents the highest level of multi-tenancy and the lowest level of isolation. The efficient consumption of resources results in the lowest costs. In this complex design, all tenant data are stored together in one database. Maintaining isolation requires advanced schema-mapping techniques (such as Basic Layout, Pivot Table Layout, or Universal Table Layout) that link data to the respective tenants \cite{Comparison_of_dbaas_architectures}.
+\end{enumerate}
+The core architecture generally includes the Database Management System (DBMS), the Cloud infrastructure (providing physical resources like computing power and storage), the Database Server (managed by the provider), and the API (offering a standardized interface for customer interaction) \cite{Security_Issues_and_Policies}.
+
+% ====================================================
+% The Evolution of DBaaS Systems
+% ====================================================
+\subsection{The Evolution of DBaaS Systems}
+The concept of DBaaS has developed in line with the growth of cloud computing. The foundation of DBaaS is rooted in the Software as a Service (SaaS) paradigm, utilizing the economic advantage provided by the "economy of the scale" principle, where applications and system environments are provided once for thousands of users \cite{Database_as_a_service}.
+Early first-generation SaaS systems utilized relational DB technology, often extending it with complex application logic to handle multi-tenancy requirements. To overcome the resulting infrastructure complexity and heavy maintenance needs, large providers (like Google, Amazon, and Yahoo!) began implementing platforms specifically for database services, promoting the idea of data outsourcing \cite{Database_as_a_service}.
+
+A significant milestone in the evolution was the introduction of Amazon Web Services’ Relational Database Service (RDS) in 2009. Initially, cloud database systems provided simple, container-like data management services, typically featuring put/get semantics for data blocks of unknown structure, and sometimes lacking support for application semantics or complex model management aspects \cite{Database_as_a_service}.
+
+Today, the evolution continues with offerings that integrate both traditional RDBMS and newer systems like NoSQL (e.g., document-oriented databases like MongoDB) and newSQL technologies. These systems are designed to keep the ACID properties of traditional relational databases while leveraging shared-nothing architecture for scaling out \cite{Database_as_a_service}. This continuous advancement means major vendors now offer a variety of database services tailored to specific application needs \cite{Security_Issues_and_Policies}.
+
+% ====================================================
+% Challenges in DBaaS Implementation
+% ====================================================
+\subsection{Challenges in DBaaS Implementation}
+DBaaS providers face significant challenges, particularly concerning resource management, isolation, and security:
+
+\subsubsection{Technical and Architectural Challenges}
+\begin{enumerate}[label=\alph*)]
+    \item \textbf{Maintaining Isolation while Minimizing Overhead}\\
+    The primary challenge is enabling multiple tenants to work in isolation while avoiding excessive resource overhead per tenant \cite{Comparison_of_dbaas_architectures}.
+
+    \item \textbf{Complexity of Shared Architectures}\\
+    In shared database architectures, providers must implement tenant-specific monitoring, backup/restore strategies, and billing techniques, which increases complexity. Furthermore, migrating a tenant to a different system is complex in a shared schema architecture because tenant data are mixed across various tables \cite{Comparison_of_dbaas_architectures}.
+
+    \item \textbf{Resource Management in Dynamic Environments}\\
+    DBaaS resource management is an online problem, requiring continuous decisions on which replicas to assign to which nodes, as tenants frequently arrive, depart, and exhibit high variance in their resource demands over time \cite{Solver_in_the_loop_cluster_resource_management_for_DBaaS}.
+
+    \item \textbf{Handling Resource Over-Subscription}\\
+    Providers often over-subscribe resources to improve cluster utilization and reduce costs. However, this necessitates intelligent placement decisions to prevent resource demand from exceeding capacity, leading to resource violations \cite{Solver_in_the_loop_cluster_resource_management_for_DBaaS}.
+\end{enumerate}
+
+\subsubsection{Security Challenges}
+\begin{enumerate}[label=\alph*)]
+    \item \textbf{Data Confidentiality and Breaches}\\    
+    Sensitive data stored in cloud databases are subject to critical concerns regarding confidentiality, as unauthorized access or data breaches pose significant risks \cite{Security_Issues_and_Policies}.
+
+    \item \textbf{Reduced Isolation in Multi-tenancy}\\
+    The shared memory model inherent in DBaaS architectures means each virtual server could potentially access the memory address space of others, creating risks of unauthorized access to confidential information \cite{Security_Issues_and_Policies}.
+
+    \item \textbf{Unsecured Interfaces and APIs}\\
+    Low-security interfaces or APIs are potential attack vectors.Robust interfaces should incorporate user authentication, data encryption, and access control measures. A high-quality API architecture is necessary to mitigate these risks \cite{Security_Issues_and_Policies}.
+
+    \item \textbf{Data Integrity and Availability}\\
+    Data integrity is another significant challenge, as data can be intentionally or unintentionally modified or deleted by authorized or unauthorized users, leading to corruption or loss. Additionally, data privacy concerns arise when cloud providers fail to ensure that users’ data is not accessed or used without consent \cite{Security_Issues_and_Policies}.
+
+    \item \textbf{Malicious Insiders}\\
+    Malicious insiders present significant security risks. Attackers leveraging extensive cloud services may exploit internal vulnerabilities. Cloud service consumers are responsible for securing encryption keys. If keys are exposed and consumers fail to retain copies, insider attacks become feasible. Relying solely on cloud providers for data protection puts consumers at risk \cite{Security_Issues_and_Policies}.
+    
+\end{enumerate}
+% ====================================================
+% Benefits of DBaaS Systems
+% ====================================================
+\subsection{Benefits of DBaaS Systems}
+Despite challenges, DBaaS offers substantial advantages that drive widespread adoption:
+\begin{enumerate}[label=\alph*)]
+    \item \textbf{Cost Savings and Economic Advantages}\\
+    Customers are relieved of the need for upfront capital investments in hardware and software. The service utilizes a pay-per-use basis, which, combined with multi-tenancy, offers the "economy of the scale" principle, leading to significant cost reduction. Furthermore, the diminished need for full-time database administrators reduces employment costs.
+
+    \item \textbf{Increased Focus on Core Competencies}\\
+    By outsourcing IT maintenance and infrastructure complexities, enterprises can redirect their focus toward their core business activities \cite{Comparison_of_dbaas_architectures, Database_as_a_service}.
+
+    \item \textbf{High Availability and Disaster Recovery}\\
+    DBaaS provides built-in multi-zone replication, automated backups, and failover mechanisms. This level of reliability is difficult to achieve in traditional on-premise deployments \cite{Impact_of_Performance_Metrics_on_Database_Speedup_in_DBaaS}.
+
+    \item \textbf{High Scalability and Flexibility}\\
+    DBaaS provides access to dynamically scalable computing infrastructure on demand. The platform demands dynamic scaling, both horizontally and vertically, which is closely linked to the underlying database system's capabilities. Customers can choose database services tailored precisely to their needs \cite{Impact_of_Performance_Metrics_on_Database_Speedup_in_DBaaS}.
+
+    \item \textbf{Reduced Administrative Burden}\\
+    DBaaS abstracts the installation and configuration of the database system. Providers handle maintenance work such as backups, upgrades, and restores, reducing the administrative burden on the tenant \cite{Comparison_of_dbaas_architectures}.
+\end{enumerate}

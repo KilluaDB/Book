@@ -1,0 +1,64 @@
+## Core LaTeX auxiliary files
+*.aux
+*.lof
+*.log
+*.lot
+*.fls
+*.out
+*.toc
+*.fmt
+*.fot
+*.cb
+*.cb2
+.*.lb
+
+## Intermediate documents
+*.dvi
+*.xdv
+*-converted-to.*
+# Note: Usually you want to keep the final compiled PDF, but if you want to ignore it:
+# *.pdf
+
+## Bibliography auxiliary files (BibTeX / biblatex)
+*.bbl
+*.bcf
+*.blg
+*-blx.aux
+*-blx.bib
+*.run.xml
+
+## Build tool auxiliary files
+*.fdb_latexmk
+*.synctex
+*.synctex(busy)
+*.synctex.gz
+*.pdfsync
+
+## Auxiliary files for packages
+# pgf/tikz
+*.dpth
+*.md5
+*.auxlock
+
+# listings
+*.vrb
+
+# glossaries
+*.ist
+*.glo
+*.gls
+*.glg
+
+# hyperref
+*.brf
+
+# todonotes
+*.tdo
+
+# xindy
+*.xdy
+
+## PythonTeX
+pytxcode.pdf
+*.pytxcode
+pythontex-files-*/

@@ -1,0 +1,69 @@
+\section{Feasibility Study}
+
+The feasibility study evaluates the technical, economic, and operational viability of developing a custom AI-powered DBaaS platform. This analysis demonstrates that the proposed system addresses key market gaps while leveraging an architecture optimized for performance, scalability, and cost efficiency.
+
+\subsection{Technical Feasibility}
+
+The primary technical challenge of the proposed system lies in the efficient lifecycle management of database instances. Unlike conventional solutions that rely on heavyweight virtualization or external orchestration platforms such as Kubernetes, this project adopts a lightweight custom orchestration layer implemented in Golang.
+
+\subsubsection*{Custom Orchestration Strategy (Golang)}
+\begin{itemize}
+    \item \textbf{Suitability for System Programming:} The backend is implemented in Golang due to its strong concurrency model based on goroutines and its suitability for system-level programming. This enables the orchestrator to efficiently solve the online resource allocation problem, dynamically placing database instances as tenants join or leave the system with minimal latency.
+    \item \textbf{Direct Docker Integration:} The orchestrator interfaces directly with the Docker Engine API rather than introducing the abstraction overhead of Kubernetes. This approach reduces system complexity and resource consumption while enabling fine-grained control over container lifecycles (start, stop, restart) and resource constraints via cgroups.
+    \item \textbf{Performance:} Empirical research shows that containerization introduces negligible overhead compared to virtual machines, achieving millisecond-level startup times. By avoiding hypervisor-related overhead, the system maximizes hardware utilization and responsiveness.
+\end{itemize}
+
+\subsubsection*{Database Engine Compatibility}
+\begin{itemize}
+    \item The platform supports PostgreSQL for relational workloads and MongoDB for document-oriented workloads. Studies indicate that PostgreSQL deployed in containerized environments can meet or exceed virtual machine deployments for many common operations such as INSERT and DELETE when I/O is provisioned appropriately.
+    \item Although containerized databases share the host kernel, potentially leading to I/O contention in dense multi-tenant environments, this risk is mitigated through strict resource isolation policies enforced by the custom orchestrator (cgroup limits, CPU/memory quotas, I/O throttling), addressing the noisy-neighbor problem.
+\end{itemize}
+
+\subsubsection*{AI Integration (LLM Agent-Centric)}
+\begin{itemize}
+    \item \textbf{LLM Agent for Schema Generation and Assistance:} Rather than depending on a retrieval-augmented generation pipeline, the system employs persistent, schema-aware LLM agents that analyze project artifacts (uploaded CSV/JSON samples, existing schema metadata, example rows) to infer, generate, and iteratively refine database schemas. These agents output concrete DDL/DDL-like constructs (CREATE TABLE/collection, field types, indexes, constraints) and produce human-readable rationales and ERD visualizations for developer review.
+    \item \textbf{Agent-Oriented Embedding and Local Indexing:} For internal use (e.g., fast lookup of previously generated schema fragments, example rows that support agent explanations), the system maintains localized embedding indices and metadata stores consumed by the agent pipeline; these indices are operational auxiliaries to the agents (not a global retrieval service) and are primarily used to ground agent proposals in concrete evidence from the user's project.
+    \item \textbf{Planner/Verifier Agent Pattern:} Complex changes (schema migration, cross-store normalization) are executed via coordinated multi-agent workflows: a \emph{planner agent} proposes a migration plan, a \emph{verifier agent} simulates and validates transformations (dry-run against a sandbox), and an \emph{executor agent} carries out approved steps under human supervision. This pattern reduces destructive errors and improves trustworthiness of automated transformations.
+    \item \textbf{Operational Constraints and Safety:} Agents operate with strict capability scoping and policy constraints: they cannot perform destructive operations without explicit user approval; every proposed change is logged along with the agent prompt and evidence used for that decision to preserve auditability and reproducibility.
+    \item \textbf{Feasibility and Integration:} Modern LLM APIs and on-premise model runtimes make these agentic workflows technically feasible; the system focuses on orchestration, schema grounding, and controlled execution rather than on generic large-scale document retrieval pipelines.
+\end{itemize}
+
+\subsection{Economic Feasibility}
+
+The economic analysis highlights the cost efficiency of the proposed platform compared to hyperscale cloud DBaaS offerings.
+
+\subsubsection*{Total Cost of Ownership (TCO) Reduction}
+\begin{itemize}
+    \item \textbf{Avoiding Hyperscaler Premiums:} Surveys indicate that a majority of organizations consider large public cloud providers costly, leading to unpredictable IT budgets. By adopting a cloud-agnostic design capable of running on bare metal or lower-cost infrastructure, the proposed system significantly reduces total ownership costs.
+    \item \textbf{Resource Efficiency:} Traditional database deployments often suffer from over-provisioning. The proposed platform employs automated scaling managed by the custom Golang orchestrator, ensuring that resource usage closely matches actual demand and minimizing idle capacity costs.
+\end{itemize}
+
+\subsubsection*{Mitigation of Vendor Lock-In}
+\begin{itemize}
+    \item \textbf{High Switching Costs:} Hyperscale providers typically impose vendor lock-in through proprietary APIs and data egress fees.
+    \item \textbf{Strategic Agility:} By relying on open container standards such as Docker and avoiding proprietary DBaaS APIs, the proposed platform eliminates vendor lock-in risks and ensures deployment flexibility across diverse infrastructure environments.
+\end{itemize}
+
+\subsection{Operational and Market Feasibility}
+
+The operational and market feasibility analysis confirms strong demand for a unified, AI-driven DBaaS solution.
+
+\subsubsection*{Market Growth}
+\begin{itemize}
+    \item The global cloud database market is projected to grow substantially over the coming decade, driven by increased digitalization and demand for scalable data management solutions. This growth indicates a substantial addressable market for new DBaaS platforms.
+\end{itemize}
+
+\subsubsection*{The Unified Tool Gap}
+\begin{itemize}
+    \item Developers currently operate within a fragmented ecosystem, switching between isolated tools for SQL and NoSQL database management. There is a clear absence of a unified platform that combines multi-model database support with an intuitive visual interface suitable for students and small-to-medium enterprises.
+\end{itemize}
+
+\subsubsection*{LLM Agents as Baseline Expectation}
+\begin{itemize}
+    \item The database market is transitioning toward AI-native systems where conversational, agent-driven schema generation, schema understanding, and model-assisted operations are expected features. Integrating LLM agents as first-class participants in the development lifecycle positions the platform competitively while preserving human oversight and auditability.
+\end{itemize}
+
+\subsubsection*{Reduced Administrative Burden}
+\begin{itemize}
+    \item The platform automates operational tasks such as backups, scaling, and patching, significantly reducing administrative overhead. Agentic assistance reduces developer time spent on schema design and query authoring, enabling users to focus on application logic rather than database maintenance.
+\end{itemize}
