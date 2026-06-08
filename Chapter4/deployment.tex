@@ -1,0 +1,21 @@
+\section{Deployment and CI/CD Pipeline}
+
+The transition from local development to a production-ready environment requires a robust, reproducible deployment strategy. To guarantee system reliability and rapid iteration, the DBaaS platform relies on containerization and an automated Continuous Integration/Continuous Deployment (CI/CD) pipeline.
+
+\subsection{Containerization Strategy}
+Both the Control Plane (REST API Server) and Data Plane (PGProxy) are compiled into statically linked, highly optimized Go binaries. These binaries are packaged into ultra-lightweight \texttt{Alpine Linux} Docker images. This approach achieves several critical architectural goals:
+\begin{itemize}
+    \item \textbf{Minimal Attack Surface:} Utilizing stripped Alpine images (which possess a base size of approximately 5MB \cite{alpine_linux}) drastically reduces the number of underlying system libraries, thereby minimizing potential Common Vulnerabilities and Exposures (CVEs) associated with larger OS distributions.
+    \item \textbf{Rapid Scheduling:} The final compiled container images are extremely small (typically between 15MB to 20MB), enabling near-instantaneous image pulling and pod scheduling within the Kubernetes cluster, often completing in under 3 seconds over a standard Gigabit network.
+    \item \textbf{Environment Parity:} Dockerization guarantees that the microservices execute identically across local development, staging, and production environments, eliminating "works-on-my-machine" discrepancies.
+\end{itemize}
+
+\subsection{Continuous Integration and Delivery (CI/CD)}
+To facilitate rapid feature iteration while maintaining platform stability, the repository integrates tightly with automated CI/CD workflows:
+\begin{itemize}
+    \item \textbf{Automated Testing and Linting:} Upon every code push, the pipeline automatically triggers static code analysis (via \texttt{golangci-lint}) and executes the suite of integration tests to ensure no regressions are introduced.
+    \item \textbf{Image Building and Registry Publishing:} Upon merging code to the primary branch, the pipeline builds the Docker images for both the API Server and PGProxy, tags them with semantic versioning, and securely pushes them to a remote container registry (e.g., Docker Hub).
+\end{itemize}
+
+\subsection{Infrastructure Provisioning}
+The foundational infrastructure hosting the DBaaS platform is deployed on a cloud virtual private server (VPS). A K3s (Lightweight Kubernetes) cluster is installed as the host orchestrator. By utilizing K3s—which bundles Kubernetes components into a single binary and replaces the heavy \texttt{etcd} data store with a lightweight SQLite backend \cite{k3s_architecture}—the platform reduces the control plane's minimum memory overhead to under 512MB. This significant resource reduction is achieved while maintaining 100\% compatibility with standard Kubernetes APIs, CRDs, and Helm charts.

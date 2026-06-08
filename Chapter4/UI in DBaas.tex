@@ -1,23 +1,12 @@
-\section{UI in the Technology Stack}
+\section{Frontend Architecture and Implementation}
 
-The frontend development of the DBaaS platform focused on creating an intuitive and responsive
-user interface. Key components, including dashboards, table editors, query editors, and other
-interactive elements, were designed to provide a consistent experience across multiple screen sizes
-and devices.
+The presentation layer of the DBaaS platform is engineered to abstract the inherent complexities of multi-tenant database management behind an intuitive, declarative user interface. Rather than exposing users to raw Kubernetes manifests or complex SQL DDL commands, the frontend translates user interactions into deterministic API payloads. The architecture strictly adheres to a unidirectional data flow, ensuring that the UI remains a reactive reflection of the backend's state machine.
 
-Collaboration between the frontend, backend, and AI teams facilitated the integration of APIs and
-RAG-powered features, ensuring smooth communication with both SQL and NoSQL database systems.
-This integrated approach allows users to perform database operations efficiently within a unified
-and cohesive platform.
+\subsection{Architectural Rationale: Flutter for the Web}
 
+To construct a highly responsive, single-codebase application capable of rendering complex data grids and interactive schema diagrams, the presentation layer was implemented using \textbf{Flutter}. While traditional Document Object Model (DOM) based frameworks (e.g., ReactJS, VueJS) are prevalent, Flutter's CanvasKit rendering engine was selected for its ability to bypass DOM manipulation bottlenecks, achieving consistent pixel-perfect rendering across all environments.
 
-
-\subsection{Comparison: Flutter Web vs Other Web Technologies}
-
-To support the choice of Flutter for the frontend implementation, the team conducted a comparison
-between Flutter Web and other widely used web technologies, such as ReactJS, Angular, and VueJS.
-Table~\ref{tab:flutter_comparison} summarizes the key differences across essential features for
-modern web applications.
+Table~\ref{tab:flutter_comparison} summarizes the architectural justifications for selecting Flutter over conventional DOM-based web technologies for this specific DBaaS use case.
 
 \begin{table}[h]
 \centering

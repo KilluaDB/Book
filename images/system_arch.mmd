@@ -1,0 +1,48 @@
+flowchart TD
+    %% Styling
+    classDef client fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#01579b,rx:10,ry:10;
+    classDef backend fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#1b5e20,rx:10,ry:10;
+    classDef proxy fill:#e0f7fa,stroke:#0097a7,stroke-width:2px,color:#006064,rx:10,ry:10;
+    classDef db fill:#fff8e1,stroke:#fbc02d,stroke-width:2px,color:#f57f17;
+    classDef agent fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#880e4f,rx:10,ry:10;
+    classDef extdb fill:#ede7f6,stroke:#5e35b1,stroke-width:2px,color:#311b92;
+    classDef cache fill:#ffebee,stroke:#d32f2f,stroke-width:2px,color:#b71c1c;
+
+    %% Nodes
+    Flutter["📱 Flutter Frontend"]:::client
+    SQLClient["💻 External SQL Clients\n(psql, DBeaver)"]:::client
+
+    subgraph Backend [Go Backend Microservices]
+        direction LR
+        API["⚙️ REST API Server\n(Auth, Provisioning)"]:::backend
+        PGProxy["🔀 PGProxy\n(TCP/SNI Router)"]:::proxy
+    end
+
+    subgraph K3s [Kubernetes Cluster K3s]
+        direction TB
+        subgraph NS [Isolated Project Namespace pg-uuid]
+            direction LR
+            CNPG[("🐘 CNPG Cluster\n(PostgreSQL)")]:::db
+            PostgREST["🌐 PostgREST\n(Auto REST APIs)"]:::backend
+        end
+        MongoDB[("🍃 MongoDB Community\n(NoSQL)")]:::db
+    end
+
+    subgraph External [State & AI Services]
+        direction LR
+        PlatformDB[("🐘 Platform DB\n(PostgreSQL)")]:::extdb
+        Redis[("⚡ Redis Cache\n(Sessions & DDLs)")]:::cache
+        AIAgent["🤖 Schema AI Multi-Agent\n(OpenRouter/Google)"]:::agent
+    end
+
+    %% Connections
+    Flutter -- "HTTP/REST" --> API
+    SQLClient -- "TLS/TCP" --> PGProxy
+
+    API -- "K8s API (CRDs)" --> K3s
+    PGProxy -- "Direct TCP Proxy" --> CNPG
+    API -- "HTTP Proxy" --> PostgREST
+
+    API <--> PlatformDB
+    API <--> Redis
+    API --> AIAgent

@@ -1,163 +1,74 @@
-
 \section{System Architecture}
 \begin{figure}[H]
 \centering
 \begin{tikzpicture}[
     box/.style={rectangle, draw, minimum width=3.2cm, minimum height=1.2cm, align=center, rounded corners},
-    smallbox/.style={rectangle, draw, minimum width=2.4cm, minimum height=0.9cm, align=center, rounded corners, font=\small},
-    container/.style={rectangle, draw, dashed, minimum width=2cm, minimum height=0.8cm, align=center, font=\footnotesize},
+    smallbox/.style={rectangle, draw, minimum width=2.6cm, minimum height=0.9cm, align=center, rounded corners, font=\small},
+    container/.style={rectangle, draw, dashed, minimum width=2.4cm, minimum height=0.8cm, align=center, font=\footnotesize},
     arrow/.style={->, thick, >=stealth},
     darrow/.style={<->, thick, >=stealth}
 ]
     % Client Layer
-    \node[box, fill=blue!20] (flutter) at (-1.5,6) {Flutter\\Frontend};
-    \node[smallbox, fill=blue!10] (web) at (-5.5,6) {Web\\Browser};
-    \node[smallbox, fill=blue!10] (mobile) at (2.5,6) {Mobile\\App};
+    \node[box, fill=blue!20] (flutter) at (-3.5,7) {Flutter\\Frontend};
+    \node[box, fill=orange!20] (sqlclient) at (3.5,7) {External SQL Clients\\(psql, DBeaver)};
     
-    % API Gateway Layer - Wider
-    \node[box, fill=green!30, minimum width=11cm, minimum height=2.3cm] (backend) at (-1.5,3.5) {};
-    \node at (-1.5,4.2) {\textbf{Go Backend API Server}};
-    \node[smallbox, fill=green!15] (handlers) at (-5,3) {Handlers};
-    \node[smallbox, fill=green!15] (services) at (-1.5,3) {Services};
-    \node[smallbox, fill=green!15] (repos) at (2,3) {Repositories};
+    % Microservices Layer
+    \node[box, fill=green!30, minimum width=12cm, minimum height=2.2cm] (backend) at (0,4.5) {};
+    \node at (0,5.2) {\textbf{Go Backend Microservices}};
     
-    % Middle Layer - Docker Host, Orchestrator, and Platform DB on same line
-    \node[box, fill=gray!20, minimum width=6.5cm, minimum height=2.2cm] (dockerhost) at (-7,0.5) {};
-    \node at (-7,1.3) {\textbf{Docker Host}};
-    \node[container, fill=yellow!30] (db1) at (-9,0.2) {PSQL\\Container 1};
-    \node[container, fill=yellow!30] (db2) at (-7,0.2) {PSQL\\Container 2};
-    \node[container, fill=yellow!30] (db3) at (-5,0.2) {PSQL\\Container N};
+    \node[smallbox, fill=green!15] (api) at (-3.5,4.2) {REST API Server\\(Auth, Provisioning)};
+    \node[smallbox, fill=cyan!15] (pgproxy) at (3.5,4.2) {PGProxy\\(TCP/SNI Router)};
     
-    \node[box, fill=orange!25, minimum width=3.5cm] (orchestrator) at (1,0.5) {Orchestrator\\(Go Package)};
-    \node[box, fill=purple!20] (platformdb) at (5.5,0.5) {PostgreSQL\\Platform DB};
+    % K8s Cluster Layer
+    \node[box, fill=gray!20, minimum width=12cm, minimum height=3.5cm] (k8scluster) at (0,0.5) {};
+    \node at (0,1.9) {\textbf{Kubernetes Cluster (K3s)}};
     
-    % Bottom Layer - Redis in center
-    \node[box, fill=red!20] (redis) at (0,-2) {Redis\\Cache \& Sessions};
+    % Project Namespace Box
+    \node[box, fill=gray!10, dashed, minimum width=7cm, minimum height=2.2cm] (namespace) at (-2,0) {};
+    \node at (-2,0.8) {\footnotesize \textit{Isolated Project Namespace (pg-uuid)}};
     
-    % Arrows - Client to Backend
-    \draw[arrow] (flutter) -- (backend) node[midway, right, font=\small] {REST/JSON};
-    \draw[arrow] (web) -- (flutter);
-    \draw[arrow] (mobile) -- (flutter);
+    \node[container, fill=yellow!30] (tenant1) at (-4,-0.2) {CNPG Cluster\\(PostgreSQL)};
+    \node[container, fill=green!20] (postgrest) at (0,-0.2) {PostgREST\\Deployment};
     
-    % Internal Backend arrows
-    \draw[arrow] (handlers) -- (services);
-    \draw[arrow] (services) -- (repos);
+    \node[container, fill=yellow!30] (tenant2) at (4,-0.2) {MongoDB\\Community};
     
-    % Backend to Orchestrator (library import)
-    \draw[darrow, dashed] (services) -- (orchestrator) node[midway, right, font=\footnotesize] {Go Import};
+    % External Services
+    \node[box, fill=red!20] (redis) at (-5,-3) {Redis\\Cache};
+    \node[box, fill=purple!20] (platformdb) at (0,-3) {Platform\\Database};
+    \node[box, fill=magenta!20] (aiagent) at (5,-3) {Schema AI\\Agents};
     
-    % Backend to Data stores
-    \draw[arrow] (repos) -- (platformdb) node[midway, right, font=\small] {pgx};
+    % Arrows
+    \draw[arrow] (flutter) -- (api) node[midway, left, font=\footnotesize] {HTTP/REST};
+    \draw[arrow] (sqlclient) -- (pgproxy) node[midway, right, font=\footnotesize] {TLS/TCP};
     
-    % Orchestrator to Docker and Redis
-    \draw[arrow] (orchestrator) -- (dockerhost) node[midway, below, font=\footnotesize] {Docker API};
-    \draw[arrow] (orchestrator) -- (redis);
+    \draw[arrow] (api) -- (k8scluster) node[midway, left, font=\footnotesize] {Kubernetes API (CRDs)};
     
-    % Backend to User DBs
-    \draw[arrow] (services.south) -- (db3.north) node[pos=0.35, left, font=\small] {Dynamic Conn};
+    \draw[arrow] (pgproxy) -- (tenant1) node[midway, right, font=\footnotesize] {Direct TCP Proxy};
+    \draw[arrow] (api) -- (postgrest) node[pos=0.7, right, font=\footnotesize] {HTTP Proxy};
     
+    \draw[darrow] (api) -- (platformdb);
+    \draw[darrow] (api) -- (redis);
+    \draw[arrow] (api) -- (aiagent);
 \end{tikzpicture}
 \caption{High-Level System Architecture}
 \label{fig:architecture}
 \end{figure}
 
-
 \begin{itemize}
-    \item \textbf{Service Decomposition}: Functionality is divided into loosely coupled services (backend API, orchestrator, database instances)
-    
-    \item \textbf{Single Responsibility}: Each component has a well-defined purpose (separation of concerns)
-    
-    \item \textbf{API-first Design}: Services communicate through well-defined interfaces (REST APIs)
+    \item \textbf{Microservices Architecture}: The backend logic is decoupled into distinct standalone services, primarily the REST API Server and a dedicated PGProxy service for database traffic routing.
+    \item \textbf{Kubernetes Operator Pattern}: Tenant databases are fully managed via custom resources (CRDs) enabling declarative state management and automated self-healing.
+    \item \textbf{Namespace Isolation}: Every deployed project is securely separated into its own dynamically generated Kubernetes namespace (e.g., \texttt{pg-uuid}), enclosing both its database and API gateway.
 \end{itemize}
 
-    
+\section{Technology Stack and Tools}
 
-
-\section{Technologies Used}
-
-The DBaaS platform relies on a modern and scalable technology stack to support efficient database
-management. Although the system consists of multiple components developed by different team members,
-this subsection focuses on the technologies related to the frontend layer and its integration with
-backend and AI services.
-
-\subsubsection{Flutter}
-
-Flutter is a UI development framework created by Google that enables the development of cross-platform
-applications using a single codebase. It was selected for the DBaaS frontend due to several key
-advantages:
+The DBaaS platform is constructed using a modern, cloud-native technology stack carefully selected to optimize for scalability, fault tolerance, and cross-platform compatibility. The foundational technologies include:
 
 \begin{itemize}
-    \item \textbf{Cross-Platform Capability:} Enables building web-based applications without the need
-    for separate platform-specific implementations.
-    \item \textbf{Rapid Development Cycle:} The hot reload feature allows instant visualization of UI
-    changes, accelerating development and debugging.
-    \item \textbf{Flexible and Reusable Widgets:} Provides a wide range of customizable widgets for
-    building dashboards, tables, and interactive forms.
-    \item \textbf{Backend Communication:} Supports seamless interaction with RESTful and GraphQL APIs
-    for executing database operations.
-    \item \textbf{Responsive Design:} Ensures consistent user experience across different screen sizes
-    and devices.
-\end{itemize}
-
-\subsubsection{Backend Technologies}
-
-\textbf{Golang for Backend Development}
-
-The selection of Go as the primary implementation language is justified by several theoretical and practical considerations:
-
-\begin{enumerate}
-    \item \textbf{Concurrency Model}: Go's goroutines implement lightweight threads (green threads) multiplexed onto OS threads by the Go runtime. This M:N threading model provides efficient concurrent execution without the overhead of OS-level thread management.
-    
-    \item \textbf{Memory Safety}: Go's garbage collector prevents common memory errors (dangling pointers, buffer overflows) while maintaining performance through generational and concurrent collection algorithms.
-    
-    \item \textbf{Static Typing}: Compile-time type checking prevents entire classes of runtime errors, improving system reliability.
-    
-    \item \textbf{Compiled Execution}: Ahead-of-time compilation to native machine code provides performance comparable to C/C++ while maintaining higher-level abstractions.
-\end{enumerate}
-
-\textbf{Containerization with Docker}
-
-Docker was selected over alternatives (LXC, rkt, Podman) based on:
-
-\begin{itemize}
-    \item Industry standard with extensive tooling and ecosystem
-    \item Well-documented API for programmatic container management
-    \item Mature implementation of Linux namespaces and cgroups
-    \item Wide platform support and community knowledge base
-\end{itemize}
-
-\textbf{PostgreSQL as Database Engine}
-
-PostgreSQL was chosen for tenant databases due to:
-
-\begin{itemize}
-    \item ACID compliance ensuring data consistency and durability
-    \item MVCC (Multi-Version Concurrency Control) enabling high concurrency
-    \item Rich SQL compliance and extensibility
-    \item Small footprint in Alpine Linux containers (~200MB)
-\end{itemize}
-
-\textbf{Redis for State Persistence}
-
-Redis serves as the persistence layer for orchestrator metadata based on:
-
-\begin{itemize}
-    \item In-memory architecture providing O(1) lookup complexity
-    \item Persistence mechanisms (RDB/AOF) for durability
-    \item Atomic operations preventing race conditions
-    \item Simplicity compared to distributed databases
-\end{itemize}
-
-
-\subsubsection{Cloud and DevOps}
-
-To ensure scalability, reliability, and efficient deployment, the system adopts modern cloud and
-DevOps technologies:
-
-\begin{itemize}
-    \item \textbf{Docker:} Used for containerizing application components to ensure consistency across
-    development and production environments.
-    \item \textbf{AWS / GCP:} Cloud platforms used to securely host application services, user data,
-    and database resources.
-    \item \textbf{Git and GitHub:} Used for version control, collaboration, and team-based development.
+    \item \textbf{Go (Golang):} Selected as the primary backend systems language due to its high-performance concurrency primitives, minimal memory footprint, and native interoperability with the Kubernetes ecosystem.
+    \item \textbf{Flutter:} Utilized for the frontend client to deliver a highly responsive, single-codebase user interface. Its reactive state management is ideal for complex data visualization and real-time database dashboard interactions.
+    \item \textbf{Kubernetes (K3s):} Serves as the core container orchestration engine. K3s provides a lightweight, highly available control plane capable of dynamically provisioning isolated tenant namespaces and enforcing strict resource quotas.
+    \item \textbf{CloudNativePG and MongoDB Operators:} Specialized Kubernetes controllers utilized to abstract the complex architectural lifecycles of relational (PostgreSQL) and document (MongoDB) clusters, handling replication, self-healing, and persistent volume provisioning autonomously.
+    \item \textbf{Traefik Ingress Controller:} A dynamic HTTP reverse proxy that natively integrates with the Kubernetes API to provide automated request routing and cryptographic security for dynamically generated PostgREST endpoints.
+    \item \textbf{Redis:} Deployed as an advanced in-memory data structure store to enforce high-throughput, distributed session management and stateless JWT token rotation.
 \end{itemize}
