@@ -1,0 +1,117 @@
+\section{Technology Stack}
+
+The backend of the DBaaS platform is constructed using a modern, cloud-native technology stack carefully selected to optimize for scalability, fault tolerance, and secure infrastructure orchestration. The foundational technologies include:
+
+\begin{itemize}
+    \item \textbf{Go (Golang):} Selected as the primary backend systems language due to its high-performance concurrency primitives, minimal memory footprint, and native interoperability with the Kubernetes ecosystem.
+    \item \textbf{Flutter:} Utilized for the frontend client to deliver a highly responsive, single-codebase user interface. Its reactive state management is ideal for complex data visualization and real-time database dashboard interactions.
+    \item \textbf{Kubernetes (K3s):} Serves as the core container orchestration engine. K3s provides a lightweight, highly available control plane capable of dynamically provisioning isolated tenant namespaces and enforcing strict resource quotas.
+    \item \textbf{CloudNativePG and MongoDB Operators:} Specialized Kubernetes controllers utilized to abstract the complex architectural lifecycles of relational (PostgreSQL) and document (MongoDB) clusters, handling replication, self-healing, and persistent volume provisioning autonomously.
+    \item \textbf{Traefik Ingress Controller:} A dynamic HTTP reverse proxy that natively integrates with the Kubernetes API to provide automated request routing and cryptographic security for dynamically generated PostgREST endpoints.
+    \item \textbf{Redis:} Deployed as an advanced in-memory data structure store to enforce high-throughput, distributed session management and stateless JWT token rotation.
+    \item \textbf{PostgREST:} Deployed as an automated sidecar alongside PostgreSQL instances to instantly expose tenant data via a secure, performant REST API.
+\end{itemize}
+
+\section{Project Directory Structure}
+
+The codebase strictly adheres to standard Go project layouts and principles of Clean Architecture. 
+
+\begin{itemize}
+    \item \texttt{cmd/api/main.go}: The single entry point for the application. It initializes the environment, invokes the server constructor, blocks on HTTP listener execution, and orchestrates graceful shutdown by intercepting \texttt{SIGINT}/\texttt{SIGTERM} signals and invoking \texttt{server.CloseResources()}.
+    \item \texttt{internal/server/server.go}: Contains \texttt{NewServer()}, the centralized dependency injection graph. All database connections, repositories, services, and handlers are explicitly wired here. The project intentionally avoids reflection-based DI frameworks to ensure compile-time safety and rapid startup.
+    \item \texttt{internal/database/}: Contains \texttt{EnsureDatabaseExists()} to autonomously bootstrap the meta-database, and \texttt{RunMigrations()}, which sequentially executes the idempotent SQL migrations. No third-party migration library is utilized; raw SQL DDL strings are executed natively.
+    \item \texttt{internal/service/}: Contains the core business logic.
+    \begin{itemize}
+        \item \texttt{auth\_service.go}: Manages token issuance and rotation.
+        \item \texttt{project\_service.go}: Handles the API workflow for creating and deleting database projects.
+        \item \texttt{operator\_provisioner.go}: The translation layer that converts high-level project intents into declarative Kubernetes API payloads.
+        \item \texttt{instance\_dsn\_service.go}: Securely resolves database connection strings (DSNs) by directly fetching credentials from Kubernetes Secrets.
+    \end{itemize}
+    \item \texttt{internal/handler/}: The HTTP transport layer. It contains Gin handlers that translate HTTP JSON requests to Service-layer Data Transfer Objects (DTOs).
+    \item \texttt{internal/postgres/} and \texttt{internal/mongodb/}: Domain-specific implementations for polymorphic database routing. Each contains its own \texttt{infra/} connection manager, \texttt{service/} layer, and \texttt{handler/} layer to achieve a strict Separation of Concerns.
+    \item \texttt{internal/backup/}: Handles the orchestration of database exports and imports by streaming OS binary execution pipes directly to HTTP interfaces.
+\end{itemize}
+
+\section{Startup and Shutdown Sequence}
+
+The lifecycle of the backend service is rigidly deterministic. Tracing the execution from \texttt{main.go} into \texttt{NewServer()} reveals the following startup sequence:
+
+\begin{enumerate}
+    \item \textbf{Environment Initialization}: \texttt{godotenv} implicitly loads the \texttt{.env} file. \texttt{validateRequiredEnvVars()} is immediately invoked, failing fast if any required configuration variables are missing.
+    \item \textbf{Database Bootstrapping}: \texttt{database.EnsureDatabaseExists()} connects as an admin to verify the application database exists. Subsequently, \texttt{database.Connect()} initializes the primary \texttt{pgxpool.Pool}.
+    \item \textbf{Migration Execution}: \texttt{database.RunMigrations()} executes the idempotent SQL migrations.
+    \item \textbf{Kubernetes Discovery}: \texttt{service.NewOperatorProvisioner()} attempts to load an \texttt{InClusterConfig}. If the binary is executing locally, it natively falls back to parsing \texttt{\textasciitilde/.kube/config}.
+    \item \textbf{Dependency Wiring}: The complete tree of repositories, services, and middleware is manually constructed. This includes wiring the Redis client into the authorization service graph.
+    \item \textbf{Listener Activation}: An \texttt{http.Server} is instantiated with strict timeouts: \texttt{IdleTimeout} of 1 minute, \texttt{ReadHeaderTimeout} of 10 seconds, while \texttt{ReadTimeout} and \texttt{WriteTimeout} are disabled (\texttt{0}) to permit the handlers to manage long-running data streaming deadlines.
+\end{enumerate}
+
+Upon receiving an OS termination signal, the graceful shutdown sequence initiates:
+\begin{enumerate}
+    \item The signal channel intercepts \texttt{SIGINT} or \texttt{SIGTERM}.
+    \item \texttt{srv.Shutdown(ctx)} is invoked with a 5-second deadline, allowing in-flight HTTP requests to drain.
+    \item \texttt{server.CloseResources()} is called, sequentially triggering \texttt{CloseAll()} on the Postgres and MongoDB Connection Managers to flush the active connection pools, followed by \texttt{database.Close()} for the Meta-DB.
+\end{enumerate}
+
+\section{Authentication Implementation}
+
+\subsection*{Cryptographic Memory Sanitization}
+The implementation of user registration in \texttt{auth\_service.go} strictly enforces security primitives:
+\begin{enumerate}
+    \item The user's password string is cryptographically hashed using \texttt{bcrypt} via \texttt{utils.Hash()}. 
+    \item Immediately following the hash generation, the plain-text password field in the memory struct is explicitly overwritten: \texttt{user.Password = ""}. This manual memory management prevents the raw credential from lingering in heap space, mitigating memory dumping attacks.
+    \item The record is inserted into the \texttt{users} table.
+    \item The JWT token pair is generated and the refresh token is stored in Redis via \texttt{redisClient.Set()} to enable instantaneous global revocation.
+\end{enumerate}
+
+\subsection*{OAuth Integration}
+The Google OAuth flow implemented in \texttt{google\_auth\_service.go} builds a stateful redirect URI. Upon receiving the Google callback containing the authorization \texttt{code}, the backend exchanges it for a Google token, fetches the user's profile, and implicitly upserts the user into the Meta-DB, yielding a standard platform JWT pair identical to the password-based login.
+
+\section{Kubernetes Provisioner Implementation}
+
+The \texttt{OperatorProvisioner} acts as the exclusive translation bridge between Go structs and the Kubernetes cluster state.
+
+\subsection*{Dynamic Client Construction}
+To interface with custom operators, the provisioner relies entirely on the \texttt{k8s.io/client-go/dynamic} package. The backend manipulates Custom Resources (CRs) using the \texttt{unstructured.Unstructured} wrapper. For example, creating a CloudNativePG cluster involves constructing a deep \verb|map[string]interface{}| defining the \texttt{spec.instances} and \texttt{spec.storage.size}. This architectural decision guarantees that the backend binary does not require tightly coupled, compiled dependencies on specific operator SDK versions, drastically simplifying dependency management and upgrades.
+
+\subsection*{PostgREST TLS Ingress Configuration}
+During the fulfillment phase of PostgreSQL provisioning, the Go provisioner automatically generates an API sidecar. To secure data-in-transit, the backend invokes \texttt{createPostgRESTIngressRoute()}, which natively templates a Traefik \texttt{IngressRoute} Custom Resource. The Go map is explicitly configured with a \verb|tls: {}| section, instructing the Traefik proxy to dynamically intercept, terminate HTTPS requests, and route the unencrypted HTTP traffic to the isolated PostgREST pod within the tenant's namespace.
+
+\section{Connection Management Implementation}
+
+The \texttt{ConnectionManager} handles thousands of ephemeral database connections. The core retrieval method, \texttt{acquireCachedPool()}, utilizes a highly optimized Mutex lock pattern:
+
+\begin{verbatim}
+s.pgPoolMu.Lock()
+// Check cache for existing projectID...
+s.pgPoolMu.Unlock()
+// If miss: connectAndCachePool() executes without blocking the global mutex
+\end{verbatim}
+
+By explicitly releasing the lock prior to invoking the blocking \texttt{pgxpool.New()} network call, the manager ensures that a slow TCP handshake to \texttt{Project A} does not serialize and block concurrent queries targeting \texttt{Project B}. The \texttt{pgxpool} defaults are retained, allocating a maximum of 4 concurrent connections per tenant pool.
+
+\section{Query Execution and AI Integration}
+
+\subsection*{Query Bounding and Telemetry}
+The query execution engine in \texttt{query\_service.go} parses incoming SQL. To enforce the global resource protection policy, the service dynamically injects a \texttt{LIMIT 50} clause if no limit is present before transmission to the database.
+
+Furthermore, historical query telemetry is extracted seamlessly via PostgreSQL's native \texttt{pg\_stat\_statements} extension. The Go implementation of \texttt{GetQueryHistory()} executes system queries to return comprehensive metrics, including mean execution time, rows affected, and shared buffer cache hit ratios.
+
+\subsection*{Dynamic Multi-Model LLM Routing}
+The AI schema generation implementation dynamically resolves target models based on provider prefixes (e.g., \texttt{openrouter/}, \texttt{google/}). To authenticate against external providers (DeepSeek, Google AI Studio) without hardcoding credentials in the application image, the backend reads the API keys directly from a Kubernetes Secret mounted via environment variables during pod initialization. It then constructs the specialized HTTP client headers on the fly before establishing the Server-Sent Events (SSE) stream back to the client.
+
+\section{Backup and Streaming Implementation}
+
+The disaster recovery engine in \texttt{internal/backup/} implements a highly scalable, zero-disk-I/O streaming architecture. 
+
+During an export request, the backend executes the \texttt{pg\_dump} binary inside the cluster network via \texttt{exec.CommandContext()}. The \texttt{Stdout} pipe of the underlying OS process is copied directly to the Gin \texttt{ResponseWriter}. The Go handler mutates response headers in real-time (e.g., serving \texttt{Content-Type: application/sql} for plain dumps).
+
+During an import, a strict 30-minute context deadline (\texttt{importMaxDuration}) is enforced. The client's HTTP request body (\texttt{c.Request.Body}) is piped synchronously into the \texttt{Stdin} of the \texttt{pg\_restore} or \texttt{mongorestore} process execution.
+
+\section{Deployment Implementation}
+
+The transition to production is codified within the shell automation pipelines.
+
+\subsection*{Containerization and Execution}
+The application is compiled using a multi-stage Dockerfile that builds the Go binary and packages it into an ultra-minimal Alpine Linux runtime layer \cite{alpine_linux} lacking an internal shell or package manager, drastically reducing the attack surface.
+
+The \texttt{start.sh} script deploys the application into the cluster. It dynamically generates the \texttt{backend-secrets} Secret by interpolating the host's \texttt{.env} file. Finally, it applies the \texttt{deploy/rbac.yaml} manifests, granting the backend's \texttt{ServiceAccount} specific, namespace-scoped privileges strictly limited to manipulating \texttt{postgresql.cnpg.io} clusters, \texttt{IngressRoutes}, and core \texttt{secrets}.

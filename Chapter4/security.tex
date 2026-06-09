@@ -1,24 +1,24 @@
 \section{Security Engineering and Network Isolation}
 
-Given the inherently sensitive nature of a multi-tenant Database-as-a-Service platform, the system was engineered with a \textbf{Zero-Trust} security architecture at its core. This paradigm assumes that no network traffic, internal or external, is inherently trusted, necessitating cryptographic verification and strict network boundaries across all layers.
+Given the sensitive nature of a multi-tenant Database-as-a-Service platform, the system implements a \textbf{Zero-Trust} security architecture. This paradigm assumes that no network traffic, internal or external, is inherently trusted, necessitating strict network boundaries across all layers.
 
 \subsection{Kubernetes Namespace and Network Isolation}
-To prevent lateral movement between tenants in the event of a container compromise, the DBaaS platform leverages Kubernetes-native isolation mechanisms:
-\begin{itemize}
-    \item \textbf{Cryptographic Namespace Generation:} Every newly provisioned database project is encapsulated within a dynamically generated, cryptographically unique Kubernetes Namespace (e.g., \texttt{pg-<uuid>}). This provides a rigid logical boundary for resource allocation.
-    \item \textbf{Network Policies (Default-Deny):} The cluster implements strict Layer 4 Network Policies. By default, all ingress and egress traffic between tenant namespaces is denied. A tenant's database pod is only permitted to receive traffic from its dedicated PostgREST sidecar, the global PGProxy, and approved internal metrics scrapers. It is physically impossible for a pod in \texttt{Tenant A} to route packets to the database in \texttt{Tenant B}.
-\end{itemize}
+To prevent lateral movement between tenants in the event of a container compromise, the DBaaS platform leverages Kubernetes-native isolation mechanisms. Every newly provisioned database project is encapsulated within a unique Kubernetes Namespace (e.g., \texttt{pg-<uuid>}). This provides a rigid logical boundary for resource allocation and fault isolation.
 
 \subsection{Zero-Trust Credential Management}
 Traditional database applications often suffer from hardcoded credentials or insecure environment variables. The platform completely eliminates this anti-pattern:
 \begin{itemize}
-    \item \textbf{Ephemeral Secret Injection:} During the provisioning workflow, the Go backend securely processes the tenant password and directly injects it into a Base64-encoded Kubernetes \texttt{Secret} \textit{before} the database pods are scheduled. The CloudNativePG and MongoDB operators then securely bootstrap the clusters using these injected secrets.
+    \item \textbf{Ephemeral Secret Injection:} During the provisioning workflow, the Go backend processes the tenant password and directly injects it into a Kubernetes \texttt{Secret} \textit{before} the database pods are scheduled. The CloudNativePG and MongoDB operators then securely bootstrap the clusters using these injected secrets.
     \item \textbf{No Persistent DSN Storage:} Crucially, the control plane \textit{never} stores these database passwords in the platform's Meta-Database. When the Connection Manager needs to route a query, it dynamically requests the \texttt{Secret} from the Kubernetes API and constructs the Data Source Name (DSN) entirely on the fly, ensuring credentials exist strictly in ephemeral memory.
+    \item \textbf{Memory Sanitization:} User passwords undergo bcrypt password hashing before storage. The plain-text password is zeroed out in memory immediately after hashing, mitigating the risk of credential leaks during memory dumps.
 \end{itemize}
 
-\subsection{Stateless JWT and Token Hijacking Mitigation}
-The REST API Server enforces robust Identity and Access Management (IAM) through a dual-token authentication state machine:
+\subsection{Kubernetes Role-Based Access Control (RBAC)}
+The backend pod executes under a least-privilege ServiceAccount. It possesses namespace-scoped Roles restricted exclusively to creating and reading database Custom Resources and Secrets. It fundamentally lacks cluster-admin privileges, ensuring a contained blast radius if the pod is ever compromised.
+
+\subsection{Stateless JWT and Session Management}
+The REST API Server enforces Identity and Access Management (IAM) through a dual-token authentication model:
 \begin{itemize}
-    \item \textbf{Asymmetric Token Lifecycles:} Upon successful Google OAuth or standard email authentication, the system issues a short-lived Access Token (15 minutes) and a long-lived Refresh Token (30 days). The Access Token is entirely stateless, allowing distributed microservices to authorize requests instantly without inducing database lookup latency.
-    \item \textbf{Cryptographic Rotation via Redis:} To mitigate the risk of token hijacking—a common vulnerability in stateless architectures—Refresh Tokens are persisted in an ultra-fast Redis cache. When a client requests a new Access Token, the backend validates the Refresh Token against Redis, immediately invalidates the old token family, and issues a completely new token pair. If a hijacked token is reused, the system detects the anomaly and instantly revokes all active sessions for that user.
+    \item \textbf{Asymmetric Token Lifecycles:} Upon successful authentication, the system issues a short-lived Access Token (15 minutes) and a long-lived Refresh Token (30 days). The Access Token is stateless, allowing microservices to authorize requests without inducing database lookup latency.
+    \item \textbf{Session Control via Redis:} To prevent token hijacking, Refresh Tokens are persisted in a Redis cache. When a client requests a new Access Token, the backend validates the Refresh Token against Redis and issues a new access token. During a logout event, the specific refresh token key is deleted from the cache, immediately revoking its ability to issue new access tokens.
 \end{itemize}
