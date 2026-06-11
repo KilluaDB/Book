@@ -1,0 +1,177 @@
+
+
+To enforce strict fault-domain isolation and permit independent horizontal scaling, the backend architecture physically separates operations into specialized components across distinct topological boundaries.
+
+
+
+\section{Control Plane: REST API Architecture}
+The REST API Server functions as the orchestration engine. To ensure testability and strict separation of concerns, the codebase adheres to the principles of Clean Architecture. The system is organized into three distinct layers:
+\begin{itemize}
+    \item \textbf{Handler Layer (Transport \& Routing):} Acts as the system's edge. It intercepts incoming RESTful requests, enforces rate-limiting, performs schema validation, and returns standardized JSON responses. Handlers delegate validated payloads to the underlying services.
+    \item \textbf{Service Layer (Domain Logic):} Encapsulates the platform's business rules. It orchestrates multi-step operations such as unified database backups and infrastructure provisioning.
+    \item \textbf{Repository Layer (Persistence Abstraction):} Abstracts all I/O operations and state persistence, decoupling the domain logic from the storage engines. It implements the Repository Pattern to manage interactions with the centralized Platform Meta-Database and Redis session cache.
+\end{itemize}
+
+\section{Data Plane: PGProxy SNI Router}
+Facilitating direct, secure SQL access for external GUI clients (e.g., DBeaver) presents a routing challenge in a dynamically orchestrated Kubernetes environment. The platform solves this via a custom Layer 4 TCP proxy:
+\begin{itemize}
+    \item \textbf{TLS Server Name Indication (SNI) Routing:} External clients initiate connections via subdomains (e.g., \texttt{db-<uuid>.postgres.domain.com}). The proxy parses the \texttt{ClientHello} packet to extract the requested SNI and resolve the target tenant's internal cluster IP.
+    \item \textbf{Zero-Termination End-to-End Encryption:} PGProxy operates at the transport layer and does not terminate TLS. By establishing a transparent TCP tunnel directly to the internal database pod, it ensures secure end-to-end encryption and preserves native PostgreSQL authentication mechanisms like SCRAM-SHA-256.
+\end{itemize}
+
+\section{Platform Data Model}
+
+The platform's canonical state is maintained within the Meta-Database. The schema consists of two primary entities and enumerated types for data integrity. 
+
+% TODO: Insert Entity-Relationship Diagram here
+% \begin{figure}[H]
+%     \centering
+%     \includegraphics[width=0.8\textwidth]{figures/erd.png}
+%     \caption{Entity-Relationship Diagram of the Meta-Database}
+%     \label{fig:meta_db_erd}
+% \end{figure}
+
+\subsection*{Enumerated Types}
+The database utilizes custom \texttt{ENUM} types to ensure strict state transitions and resource allocations:
+\begin{verbatim}
+CREATE TYPE db_type_t AS ENUM (
+    'postgresql', 'mongodb'
+);
+CREATE TYPE instance_status_t AS ENUM (
+    'creating', 'running', 'failed', 'paused', 'deleted'
+);
+CREATE TYPE resource_tier_t AS ENUM (
+    'free', 'basic', 'premium'
+);
+\end{verbatim}
+
+\subsection*{Users Entity}
+The \textbf{Users} entity manages global identity. It utilizes a \texttt{deleted\_at} column for soft-deletion, preserving referential integrity for historical audits.
+\begin{verbatim}
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user',
+  status TEXT NOT NULL DEFAULT 'active',
+  deleted_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  last_login_at TIMESTAMP WITH TIME ZONE
+);
+\end{verbatim}
+
+\subsection*{Projects Entity}
+The \textbf{Projects} entity serves as the canonical registry for provisioned infrastructure. It maintains referential integrity to the user while tracking database types, resource tiers, and operational states.
+\begin{verbatim}
+CREATE TABLE IF NOT EXISTS projects (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  db_type db_type_t NOT NULL,
+  resource_tier resource_tier_t NOT NULL DEFAULT 'free',
+  status instance_status_t NOT NULL DEFAULT 'creating',
+  runtime_created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  runtime_updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+\end{verbatim}
+
+
+
+\section{Database Provisioning Design}
+
+Rather than interacting with low-level container runtimes directly, the backend acts as an intelligent Kubernetes client. The provisioning workflow executes a predictable state machine:
+
+\begin{enumerate}
+    \item \textbf{Resource Validation}: The REST handler validates the request payload and verifies the user's tier quotas.
+    \item \textbf{Optimistic Registration}: The project record is created in the Meta-Database with a status of \texttt{creating}.
+    \item \textbf{Template Engine}: The provisioner dynamically templates the declarative Custom Resource Definitions (CRDs) required for the target database engine.
+    \item \textbf{Secret Injection}: The tenant's password is securely injected into a Kubernetes \texttt{Secret}.
+    \item \textbf{Declarative Application}: The templated CRDs are applied against the cluster's control plane.
+    \item \textbf{Readiness Polling}: The HTTP request blocks the calling goroutine, utilizing a context-bound polling loop (up to 10 minutes) until the underlying Pods report full operational readiness, at which point the status is updated to \texttt{running}.
+\end{enumerate}
+
+\subsection*{MongoDB vs. PostgreSQL Provisioning Differences}
+While the state machine is identical across both paradigms, the underlying orchestration diverges slightly based on the selected database type:
+\begin{itemize}
+    \item \textbf{Operator Abstraction:} PostgreSQL clusters are provisioned as \texttt{Cluster} objects via CloudNativePG. Conversely, MongoDB provisions single-member \texttt{MongoDBCommunity} ReplicaSets.
+    \item \textbf{Namespace Topology:} Both database engines enforce strict multi-tenant isolation. PostgreSQL instances are deployed into \texttt{pg-<uuid>} namespaces, while MongoDB instances are identically isolated within \texttt{mongo-<uuid>} namespaces.
+    \item \textbf{Sidecar Components:} For PostgreSQL, the provisioner automatically deploys a dedicated PostgREST pod within the namespace to expose an instant, secure HTTP API over the tenant's data. MongoDB instances do not require a sidecar, as the backend natively translates frontend REST requests into MongoDB wire protocol queries.
+\end{itemize}
+
+\subsection*{Resource Tiers}
+The provisioner enforces strict CPU, Memory, and Storage limits via the Kubernetes CRDs based on the project's selected resource tier:
+
+\begin{table}[H]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|l|l|l|l|}
+    \hline
+    \textbf{Tier} & \textbf{CPU} & \textbf{Memory} & \textbf{Storage} \\
+    \hline
+    \texttt{free} & 0.5 cores & 512 MiB & 5 GiB \\
+    \hline
+    \texttt{basic} & 1.0 cores & 1024 MiB & 10 GiB \\
+    \hline
+    \texttt{premium} & 2.0 cores & 2048 MiB & 20 GiB \\
+    \hline
+    \end{tabular}
+    \caption{Project Resource Tier Limits}
+    \label{tab:resource_tiers}
+\end{table}
+
+\subsection*{The Synchronous Execution Tradeoff}
+The API implements a fully synchronous workflow. The API Gateway maintains the active network connection and polls the orchestration layer until the requested cluster achieves full operational readiness. 
+
+This synchronous design is a deliberate engineering tradeoff. While it enforces strong consistency regarding the deployment state and significantly reduces system complexity by eliminating distributed message queues, it introduces potential timeout vulnerabilities. Holding an HTTP connection open for several minutes risks connection termination by external load balancers. The architecture accepts this limitation, mitigating it through extended ingress timeout configurations and relying on client-side state reconciliation if the network drops.
+
+\section{Connection Pool Design}
+
+To efficiently route user queries against thousands of isolated database instances, the backend implements a Just-In-Time Connection Manager.
+
+\subsection*{The Cache Eviction Strategy}
+The manager caches active connection pools keyed by the project identifier. By caching the pool, the system bypasses TCP connection overhead for active projects, answering queries with minimal latency.
+
+To ensure the cache never serves stale connections, the manager relies on lazy, synchronous liveness verifications upon access. When a request requires a cached pool, the manager acquires a mutex lock and executes a lightweight ping with a 2-second timeout. If the ping fails—indicating a database pod restart or network partition—the pool is marked stale, safely evicted, and re-instantiated within the same request lifecycle. This lazy eviction strategy ensures the system remains resilient to dynamic infrastructure shifts without the overhead of continuous background health checks.
+
+\section{Schema Generation AI Architecture}
+
+The platform incorporates a natural language abstraction layer that enables users to generate complex database schemas through conversational prompts. To achieve this, the backend integrates with an external, specialized multi-agent AI pipeline. The backend operates as a secure HTTP proxy, brokering communication between the frontend client and the AI service via the \texttt{SCHEMA\_AI\_BASE\_URL} environment variable.
+
+\subsection*{Dynamic Multi-Model LLM Routing}
+To prevent vendor lock-in and provide flexible inference capabilities, the platform implements dynamic multi-model routing. Users can select from a diverse array of Large Language Model (LLM) providers, including OpenRouter, DeepSeek, and Google AI Studio. The API Gateway validates provider-prefixed model names (e.g., \texttt{deepseek/deepseek-coder}) and securely resolves the corresponding API keys injected via Kubernetes secrets, dynamically routing the inference workloads to the requested backend without exposing platform credentials to the client.
+
+\subsection*{Multi-Agent Pipeline Design}
+The schema generation process is orchestrated by a specialized multi-agent system. When a user provides natural language requirements, the system delegates the task across several specialized agents operating in a strict, phased pipeline:
+\begin{enumerate}
+    \item \textbf{Logical Design Phase:} Agents (such as the ConceptualDesignerAgent and LogicalDesignerAgent) collaborate to analyze the requirements, extracting entities and their relationships.
+    \item \textbf{Physical Design Phase:} A PhysicalDesignerAgent translates the logical model into concrete, database-specific constructs, generating the final PostgreSQL Data Definition Language (DDL) statements.
+    \item \textbf{Report Phase:} A ReportAgent synthesizes the outputs into a comprehensive Markdown summary of the generated schema.
+\end{enumerate}
+
+\subsection*{Real-Time Server-Sent Events (SSE) Streaming}
+To guarantee a non-blocking user experience during these prolonged LLM inference cycles, the API leverages Server-Sent Events (SSE). As the agents process the request, the backend streams \texttt{text/event-stream} chunks over an open HTTP connection. The streaming architecture transmits a structured sequence of JSON events, allowing the frontend UI to build a dynamic, real-time progress interface. The event payloads stream internal agent reasoning (\texttt{agent\_message}), pipeline stage transitions (\texttt{phase}), and real-time Mermaid syntax code (\texttt{mermaid}) to render the Entity-Relationship (ER) diagram natively in the client interface.
+
+\section{Text-to-SQL Execution Architecture}
+
+In addition to schema generation, the platform provides a Text-to-SQL feature that empowers users to query their provisioned databases using natural language. This feature employs a separate, specialized multi-agent pipeline exposed via a FastAPI service, configured via the \texttt{TEXT\_TO\_SQL} environment variable.
+
+\subsection*{Multi-Agent Query Pipeline}
+The Text-to-SQL translation is handled by three sequential agents designed to maximize reasoning accuracy and query validity:
+\begin{enumerate}
+    \item \textbf{Selector:} Identifies relevant tables and columns by dynamically analyzing the target database schema.
+    \item \textbf{Decomposer:} Breaks down complex user questions into simpler, logical sub-questions to improve the LLM's reasoning and zero-shot capabilities.
+    \item \textbf{Refiner:} Validates the generated SQL syntax against the extracted schema and refines it to ensure it is executable.
+\end{enumerate}
+
+\subsection*{Execution Isolation and Security}
+To maintain strict security boundaries, the AI translation service is strictly isolated from database execution. The Text-to-SQL FastAPI service only possesses the ability to generate SQL strings; it does not execute them. It returns the raw, validated SQL string to the primary Go backend. The primary backend acts as the enforcement point, responsible for applying query constraints, preventing destructive operations, and executing the generated query against the tenant's database on the user's behalf.
+
+\section{Backup and Restore Design}
+
+Disaster recovery is implemented utilizing an entirely zero-disk, streamed I/O architecture. 
+
+During an export operation, the backend spawns a backup process within the cluster network. Instead of buffering the potentially massive backup file to the local disk or RAM, the backend handler pipes the process output directly to the HTTP response stream. The client's browser immediately begins downloading the archive as the first byte is generated.
+
+Conversely, during an import operation, the incoming HTTP request body is streamed synchronously directly into the input of the restoration process. While this continuous streaming architecture successfully maintains a constant $O(1)$ memory footprint on the backend application, it is an acknowledged architectural tradeoff: by eschewing intermediate disk buffers, the system prioritizes server stability over client resumability.

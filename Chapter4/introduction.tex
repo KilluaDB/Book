@@ -60,15 +60,3 @@
     \item \textbf{Namespace Isolation}: Every deployed project is securely separated into its own dynamically generated Kubernetes namespace (e.g., \texttt{pg-uuid}), enclosing both its database and API gateway.
 \end{itemize}
 
-\section{Technology Stack and Tools}
-
-The DBaaS platform is constructed using a modern, cloud-native technology stack carefully selected to optimize for scalability, fault tolerance, and cross-platform compatibility. The foundational technologies include:
-
-\begin{itemize}
-    \item \textbf{Go (Golang):} Selected as the primary backend systems language due to its high-performance concurrency primitives, minimal memory footprint, and native interoperability with the Kubernetes ecosystem.
-    \item \textbf{Flutter:} Utilized for the frontend client to deliver a highly responsive, single-codebase user interface. Its reactive state management is ideal for complex data visualization and real-time database dashboard interactions.
-    \item \textbf{Kubernetes (K3s):} Serves as the core container orchestration engine. K3s provides a lightweight, highly available control plane capable of dynamically provisioning isolated tenant namespaces and enforcing strict resource quotas.
-    \item \textbf{CloudNativePG and MongoDB Operators:} Specialized Kubernetes controllers utilized to abstract the complex architectural lifecycles of relational (PostgreSQL) and document (MongoDB) clusters, handling replication, self-healing, and persistent volume provisioning autonomously.
-    \item \textbf{Traefik Ingress Controller:} A dynamic HTTP reverse proxy that natively integrates with the Kubernetes API to provide automated request routing and cryptographic security for dynamically generated PostgREST endpoints.
-    \item \textbf{Redis:} Deployed as an advanced in-memory data structure store to enforce high-throughput, distributed session management and stateless JWT token rotation.
-\end{itemize}
