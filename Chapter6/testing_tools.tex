@@ -1,0 +1,23 @@
+\section{Testing Tools and Frameworks}
+\label{sec:testing_tools}
+
+The suite is built on Go's standard \texttt{testing} package, augmented with a small set of focused libraries. Each tool was selected to support the deterministic, no-network goal stated in Section~\ref{sec:testing_strategy}: every dependency that would otherwise require a live service is replaced by an in-process double or a local test server. The technology stack under test is the Go backend described in Section~\ref{chap:system_implementation}.
+
+\subsection{Core Testing Framework}
+
+\begin{itemize}
+    \item \textbf{Go \texttt{testing}.} The standard library test runner provides test discovery, table-driven sub-tests via \texttt{t.Run}, per-test cleanup with \texttt{t.Cleanup}, and the \texttt{-coverprofile} instrumentation used throughout this chapter \cite{go_testing}.
+    \item \textbf{\texttt{testify}.} The \texttt{assert} and \texttt{require} packages express expectations concisely \cite{testify}. \texttt{require} stops a test immediately on a failed precondition (for example, \texttt{require.NoError} when constructing a fixture), while \texttt{assert} accumulates non-fatal checks. The suite relies heavily on \texttt{assert.ErrorIs} to assert on \emph{error identity} rather than on error strings.
+\end{itemize}
+
+\subsection{Dependency Doubles and Seams}
+
+\begin{itemize}
+    \item \textbf{\texttt{pgxmock}.} The PostgreSQL service and repository layers are exercised against \texttt{pgxmock} (\texttt{github.com/pashagolub/pgxmock/v4}), which implements the \texttt{pgx} pool and transaction interfaces in memory \cite{pgxmock}. Expectations are declared with regex or quoted-string query matchers (\texttt{ExpectBegin}, \texttt{ExpectExec}, \texttt{ExpectQuery}, \texttt{ExpectCommit}, \texttt{ExpectRollback}), so a test can assert both the SQL that the service generates and the transaction lifecycle it drives --- without a real database \cite{pgx_driver}.
+    \item \textbf{\texttt{miniredis}.} The Redis-backed refresh-token store is tested against \texttt{miniredis} (\texttt{github.com/alicebob/miniredis/v2}), a pure-Go in-memory Redis implementation \cite{miniredis}. This validates token storage, rotation, and revocation against real Redis semantics with no external server.
+    \item \textbf{\texttt{net/http/httptest}.} HTTP handlers are driven through \texttt{httptest.ResponseRecorder}, and the upstream Schema-AI Server-Sent Events (SSE) service is stubbed with \texttt{httptest.NewServer}. This lets the SSE proxy be tested against controllable upstream behaviors --- a healthy event stream, a non-2xx response, and an unreachable endpoint --- entirely on \texttt{localhost} \cite{go_testing}.
+    \item \textbf{Gin test contexts.} Because the API is built on the Gin web framework \cite{gin_framework}, handler tests construct Gin contexts through a shared \texttt{internal/testutil} helper (\texttt{NewGinContext}) that wires a request, a recorder, and any required context values such as the authenticated user ID.
+    \item \textbf{In-memory fakes.} Hand-written fakes in \texttt{internal/mocks} (a \texttt{UserStore} and a \texttt{ProjectStore}) and a \texttt{servicetest.Provisioner} stand in for persistence and for the Kubernetes-backed instance provisioner. For the operator-provisioning tests, the Kubernetes \texttt{client-go} fake clients (\texttt{kubernetes/fake} and \texttt{dynamic/fake}) provide an in-memory API server.
+\end{itemize}
+
+These tools share a common rationale: each replaces a slow, stateful, or networked dependency with a fast in-process equivalent that preserves the contract the production code depends on. The interface seams that make this substitution possible are described in Section~\ref{sec:mocking_and_fixtures}.

@@ -1,0 +1,86 @@
+\section{Mocking, Fakes, and Test Fixtures}
+\label{sec:mocking_and_fixtures}
+
+The deterministic strategy of Section~\ref{sec:testing_strategy} depends on being able to substitute every external dependency with an in-process double. This is made possible by the backend's use of \textbf{dependency injection through interfaces}: services and handlers depend on narrow Go interfaces rather than on concrete clients, so a test can supply a double that satisfies the same contract. This section catalogs the seams and the doubles wired through them. Figure~\ref{fig:test_doubles} shows the overall arrangement: a request flows through the same handler and service code in tests as in production, but at the boundary each real dependency is replaced by its in-process double.
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        node distance=10mm and 14mm,
+        box/.style={draw, rounded corners=2pt, minimum width=24mm, minimum height=9mm, align=center, font=\small},
+        prod/.style={box, fill=blue!12},
+        dbl/.style={box, fill=green!12, font=\footnotesize},
+        arr/.style={-{Latex}, thick},
+        seam/.style={-{Latex}, thick, dashed, gray!60!black}
+    ]
+        % Production code path
+        \node[prod] (handler) {Handler};
+        \node[prod, below=of handler] (service) {Service};
+        \node[prod, below=of service] (repo) {Repository / \\ Client iface};
+        \draw[arr] (handler) -- (service);
+        \draw[arr] (service) -- (repo);
+
+        % Test doubles column
+        \node[dbl, right=28mm of handler] (gin) {\texttt{httptest} \\ recorder + \\ Gin context};
+        \node[dbl, right=28mm of service] (fakes) {\texttt{mocks.UserStore} \\ \texttt{ProjectStore} \\ \texttt{servicetest.} \\ \texttt{Provisioner}};
+        \node[dbl, right=28mm of repo] (infra) {\texttt{pgxmock} \\ \texttt{miniredis} \\ \texttt{httptest} stub \\ \texttt{client-go} fake};
+
+        % Seams (interface substitution)
+        \draw[seam] (handler.east) -- (gin.west);
+        \draw[seam] (service.east) -- (fakes.west);
+        \draw[seam] (repo.east) -- (infra.west);
+
+        % Bracket label
+        \node[font=\footnotesize\itshape, text=blue!50!black, above=2mm of handler] {production code (under test)};
+        \node[font=\footnotesize\itshape, text=green!40!black, above=2mm of gin] {in-process doubles};
+    \end{tikzpicture}
+    \caption{Test-double architecture. The handler, service, and repository layers run unmodified; dashed lines mark the interface seams at which each production dependency is swapped for an in-process double.}
+    \label{fig:test_doubles}
+\end{figure}
+
+\subsection{Interface Seams}
+
+Each layer exposes its collaborators as interfaces that production code and tests both target:
+
+\begin{itemize}
+    \item The PostgreSQL services depend on a pool source that returns a \texttt{pgPoolRunner} (the subset of the \texttt{pgx} pool API they use). In production this resolves to a live tenant pool; in tests a \texttt{mockTablePoolSource} hands back a \texttt{pgxmock} pool.
+    \item The MongoDB collection service depends on a connection provider that returns a \texttt{*mongo.Database}; tests inject a \texttt{stubConn} that returns either a seeded error or a lazily-connected database.
+    \item The authentication and project services depend on store interfaces and on an \texttt{InstanceProvisioner}; tests supply the in-memory \texttt{mocks.UserStore}, \texttt{mocks.ProjectStore}, and \texttt{servicetest.Provisioner}.
+    \item The Google authentication service depends on a \texttt{userInfo} client interface, allowing a stub to replace the real Google \texttt{userinfo} call.
+\end{itemize}
+
+\subsection{In-Memory Fakes and Mocks}
+
+\begin{itemize}
+    \item \textbf{\texttt{mocks.UserStore} / \texttt{mocks.ProjectStore}.} Hand-written fakes that keep records in maps and expose seeding helpers (for example, \texttt{SeedUser}). They implement the full persistence contract so service logic --- registration, login, project ownership checks --- runs unmodified.
+    \item \textbf{\texttt{servicetest.Provisioner}.} A test double for the \texttt{InstanceProvisioner} interface. It records calls and returns configurable \texttt{ProvisionResult} values and errors, and answers tier/hostname queries, so project lifecycle logic can be tested without contacting Kubernetes or CloudNativePG.
+    \item \textbf{\texttt{pgxmock} pools.} Used wherever the code under test issues SQL, with explicit \texttt{ExpectBegin}/\texttt{ExpectExec}/\texttt{ExpectQuery}/\texttt{ExpectCommit} expectations that double as assertions on the generated SQL and the transaction lifecycle.
+    \item \textbf{\texttt{miniredis}.} Backs the refresh-token store fixture, giving real Redis semantics in memory.
+    \item \textbf{\texttt{httptest} upstreams.} Local servers that stand in for the Schema-AI SSE service, configured per test to emit a valid event stream, a non-2xx status, or to be unreachable.
+\end{itemize}
+
+\subsection{Shared Fixtures}
+
+To avoid repetition, common setup lives in \texttt{internal/testutil}: \texttt{NewGinContext} builds a Gin context, request, and recorder in one call (Listing~\ref{lst:gin_fixture}); \texttt{SetupJWTSecrets} seeds signing keys; and \texttt{NewRefreshTokenStore} returns a \texttt{miniredis}-backed store together with a cleanup function. Each helper returns a teardown closure registered through \texttt{t.Cleanup}, so fixtures are released automatically and tests remain isolated. This shared scaffolding is what allows individual test files to stay focused on behavior rather than on wiring.
+
+\begin{lstlisting}[language=Go, caption={The \texttt{NewGinContext} fixture: it encodes the request body, wires an \texttt{httptest} recorder, and returns a ready-to-drive Gin context.}, label={lst:gin_fixture}]
+// NewGinContext builds a Gin context backed by httptest for
+// handler/middleware tests.
+func NewGinContext(method, path string, body any, headers map[string]string) (*gin.Context, *httptest.ResponseRecorder) {
+    var buf bytes.Buffer
+    if body != nil {
+        _ = json.NewEncoder(&buf).Encode(body)
+    }
+    req := httptest.NewRequest(method, path, &buf)
+    if body != nil {
+        req.Header.Set("Content-Type", "application/json")
+    }
+    for k, v := range headers {
+        req.Header.Set(k, v)
+    }
+    w := httptest.NewRecorder()
+    c, _ := gin.CreateTestContext(w)
+    c.Request = req
+    return c, w
+}
+\end{lstlisting}
