@@ -1,0 +1,16 @@
+\section{Limitations and Untested Code}
+\label{sec:testing_limitations}
+
+Coverage was pursued honestly: tests were written to exercise behavior that could fail in production, not to inflate a percentage. Where the only way to reach a branch would have been to write a meaningless test or to alter production code purely for testability, the branch was deliberately left uncovered and documented rather than forced. \textbf{No production code was modified to gain coverage.}
+
+The remaining gaps fall into a few well-understood categories:
+
+\begin{itemize}
+    \item \textbf{Defensive failures of standard-library primitives.} Branches that handle a failure of the cryptographic random source (\texttt{crypto/rand}) or of \texttt{json.Marshal} on a fixed, well-typed struct cannot be triggered without faking the standard library. These branches exist for defensive correctness; in practice they do not fail for the inputs the code constructs, so a test would assert nothing meaningful.
+    \item \textbf{A hardcoded external URL.} The Google \texttt{userinfo} client targets a fixed production endpoint, which is why \texttt{FetchUserInfo} sits at 43.8\% coverage. Its request-build and transport-error branches are covered via the cancelled-context technique, but fully exercising the response-parsing path would require either contacting Google's live API or changing production code to make the URL injectable solely for tests --- a change judged not worth making for its own sake.
+    \item \textbf{Guarded \texttt{default} arms.} Several \texttt{switch} statements include a \texttt{default} case that is unreachable because an earlier validation step in the same call path already rejects any value that would fall through. These arms are retained as a safety net but cannot be reached by any valid execution.
+\end{itemize}
+
+\subsection{Scope Boundaries}
+
+Beyond these specific branches, the suite is by construction \emph{unit- and component-level}. It does not verify the system against real PostgreSQL, MongoDB, Redis, Kubernetes, or Google services, and entrypoint and wiring packages (\texttt{cmd/api}, \texttt{cmd/pgproxy}, \texttt{internal/server}) carry no unit tests. The behavior of the actual operators, network proxies, and storage layer is therefore validated empirically through the performance evaluation of Section~\ref{sec:performance_evaluation} and through manual end-to-end exercise on the \texttt{k3d} cluster, rather than by this automated suite. Closing that gap with automated integration tests is the principal item of future work in Section~\ref{sec:testing_conclusion}.

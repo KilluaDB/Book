@@ -1,0 +1,63 @@
+\section{Test Design Principles}
+\label{sec:test_design}
+
+The suite follows a small set of design principles that keep tests readable, comprehensive, and reproducible. These principles are applied consistently across the handler, service, and repository layers.
+
+\subsection{Table-Driven Tests}
+
+Where many cases share the same shape --- the same call under different inputs producing different outcomes --- the suite uses Go's idiomatic table-driven style: a slice of anonymous-struct cases iterated with \texttt{t.Run}, so each case becomes an independently reported sub-test. The project-creation handler illustrates this (Listing~\ref{lst:table_driven}): a single table enumerates an invalid body, a weak password, an unsupported \texttt{db\_type}, and an unknown resource tier, each paired with the HTTP status it must produce. New edge cases are added by appending a row rather than by duplicating boilerplate, which keeps validation coverage easy to extend.
+
+\begin{lstlisting}[language=Go, caption={Table-driven validation cases for the project-creation handler. Each row is a sub-test reporting independently.}, label={lst:table_driven}]
+tests := []struct {
+    name       string
+    body       map[string]string
+    wantStatus int
+}{
+    {"invalid body", map[string]string{}, http.StatusBadRequest},
+    {"invalid password", map[string]string{"name": "p", "db_type": "postgres", "password": "short"}, http.StatusBadRequest},
+    {"invalid db type", map[string]string{"name": "p", "db_type": "mysql", "password": "SecurePass123!"}, http.StatusBadRequest},
+    {"invalid tier", map[string]string{"name": "p", "db_type": "postgres", "password": "SecurePass123!", "resource_tier": "enterprise"}, http.StatusBadRequest},
+    {"success", map[string]string{"name": "my-db", "db_type": "postgres", "password": "SecurePass123!"}, http.StatusCreated},
+}
+for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+        c, w := testutil.NewGinContext(http.MethodPost, "/projects", tt.body, nil)
+        c.Set(utils.UserIDContextKey, userID)
+        r.HandleContext(c)
+        assert.Equal(t, tt.wantStatus, w.Code)
+    })
+}
+\end{lstlisting}
+
+\subsection{Positive and Negative Paths}
+
+Every operation is tested on both its success path and its failure paths. Beyond confirming that a valid request succeeds, tests assert that:
+
+\begin{itemize}
+    \item returned values and JSON bodies match the expected shape;
+    \item errors carry the correct \emph{identity}, checked with \texttt{errors.Is}/\texttt{assert.ErrorIs} against sentinel errors such as \texttt{ErrUserAlreadyExists}, \texttt{ErrInvalidPassword}, and \texttt{ErrProjectNotFound};
+    \item HTTP handlers translate those domain errors into the correct status codes (for example, a duplicate project yields \texttt{409 Conflict}, an unknown project yields \texttt{404 Not Found}, and a malformed request yields \texttt{400 Bad Request});
+    \item side effects occur as expected --- in the PostgreSQL layer this means asserting, through \texttt{pgxmock}, that a transaction was begun and then committed on success or rolled back on failure.
+\end{itemize}
+
+This emphasis on error identity rather than on substring matching makes the tests resilient to changes in human-readable error wording while still pinning down behavior.
+
+\subsection{Isolation and Determinism}
+
+Tests do not share mutable global state, do not depend on execution order, and do not touch the network. Fixtures are constructed fresh per test, JWT secrets are seeded through a \texttt{testutil} helper, and external dependencies are injected as doubles. As a result the entire suite is deterministic: the same inputs always produce the same outcome, which is what makes it safe to run on every change.
+
+\subsection{The Cancelled-Context Technique}
+
+A recurring challenge in testing networked clients is exercising their \emph{error} branches without depending on a real failure --- a timeout or a refused connection is inherently slow and timing-sensitive. The suite solves this with a deterministic technique: an \textbf{already-cancelled} \texttt{context.Context}.
+
+A context is created and cancelled immediately before the call under test (Listing~\ref{lst:cancelled_ctx}):
+
+\begin{lstlisting}[language=Go, caption={The cancelled-context helper: a context cancelled before use, forcing networked clients down their error path deterministically.}, label={lst:cancelled_ctx}]
+func cancelledCtx() context.Context {
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+    return ctx
+}
+\end{lstlisting}
+
+When this context is passed to a client that performs I/O, the operation short-circuits before any dialing occurs. The MongoDB driver, handed a lazily-connected database and a cancelled context, fails immediately with a deterministic \texttt{server selection error: context canceled}; the Google \texttt{userinfo} HTTP client's transport returns an error before opening a socket. Both cases let the suite cover request-build and I/O-error branches with \emph{no network and no timing dependence}, eliminating the flakiness that a real timeout would introduce. This single technique is responsible for much of the error-path coverage in the MongoDB collection service and the Google authentication service.

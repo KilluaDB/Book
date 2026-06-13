@@ -1,0 +1,17 @@
+\section{Conclusion}
+\label{sec:testing_conclusion}
+
+This chapter documented the automated verification of the control-plane backend introduced in Chapter~\ref{chap:system_implementation}. The suite is built on Go's \texttt{testing} package with \texttt{testify}, and achieves determinism by replacing every external dependency with an in-process double: \texttt{pgxmock} for PostgreSQL pools and transactions, \texttt{miniredis} for the refresh-token store, \texttt{httptest} servers for the Schema-AI SSE proxy, hand-written fakes for persistence and provisioning, and an already-cancelled context to drive networked clients down their error paths without any network. Dependency injection through narrow interfaces is what makes these substitutions possible.
+
+A disciplined gap-analysis loop --- \texttt{go test ./... -coverprofile} followed by \texttt{go tool cover -func}, then targeted tests for each genuinely reachable uncovered branch --- raised overall statement coverage from a 75.5\% baseline to \textbf{79.3\%}, with the business-logic packages reaching the high-80s to 100\% (Table~\ref{tab:coverage_results}). The remaining gaps were left uncovered deliberately and documented, and no production code was altered to inflate the figure.
+
+One technique introduced along the way is worth highlighting as a reusable pattern beyond this project: the \emph{already-cancelled context} (Section~\ref{sec:test_design}). By passing a context cancelled before the call under test, a networked client is driven down its I/O-error branch deterministically, with no real timeout, no socket, and no flakiness. It is what made the otherwise hard-to-reach error paths of the MongoDB collection service and the Google authentication service testable, and it generalizes to any Go code that performs context-aware I/O.
+
+The result is a fast, reproducible suite that gives confidence in the backend's validation rules, error mapping, and core business logic, and that guards against regressions on every change. Its principal limitation is also its design choice: it does not exercise the real databases, operators, and proxies that the system depends on at runtime. The natural next steps are therefore:
+
+\begin{itemize}
+    \item \textbf{End-to-end integration tests} against a live \texttt{k3d} cluster, provisioning real CloudNativePG and MongoDB instances through the API and asserting on observed cluster state, to validate the operator interactions that the unit suite mocks.
+    \item \textbf{Load and stress testing} of the provisioning and query paths under concurrency, building on the single-client performance measurements of Section~\ref{sec:performance_evaluation}, to characterize behavior at multi-tenant scale.
+\end{itemize}
+
+Together with the implementation and performance work of Chapter~\ref{chap:system_implementation}, this testing effort completes the engineering picture: a system that is not only built and deployed, but measurably verified.

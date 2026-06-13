@@ -1,0 +1,49 @@
+\section{Representative Test Scenarios}
+\label{sec:representative_tests}
+
+The scenarios below illustrate how the principles and tooling described earlier combine in practice. Each targets a different layer of the backend and a different class of dependency.
+
+\subsection{JWT and the Refresh-Token Store}
+
+The authentication service is tested end-to-end at the unit level against a \texttt{miniredis}-backed refresh-token store. A single test seeds JWT secrets through \texttt{testutil.SetupJWTSecrets}, then walks the full credential lifecycle: registering a user, rejecting a duplicate registration with \texttt{ErrUserAlreadyExists}, logging in with correct and incorrect passwords (asserting \texttt{ErrInvalidPassword} and \texttt{ErrUserNotFound} respectively), and finally refreshing and logging out. The refresh path asserts that rotation issues a \emph{new} refresh token distinct from the one presented, confirming that token rotation --- not merely token reissue --- is implemented correctly. Because \texttt{miniredis} provides genuine Redis semantics, storage, lookup, and revocation are all validated without an external server.
+
+\subsection{Project-Creation Handler Error Mapping}
+
+The project-creation handler is tested with a table of invalid requests, each asserting the HTTP status the handler must return: an empty body and a weak password both yield \texttt{400 Bad Request}, an unsupported \texttt{db\_type} such as \texttt{mysql} and an unknown \texttt{resource\_tier} such as \texttt{enterprise} likewise yield \texttt{400}. A separate case drives the service to report an existing project and asserts the handler maps it to \texttt{409 Conflict}. These tests pin the handler's responsibility --- translating validation failures and domain errors into the correct status codes --- independently of how the underlying service is implemented.
+
+\subsection{PostgreSQL Table DDL Validation}
+
+The table service is exercised against a \texttt{pgxmock} pool injected through its pool-source seam. For a successful \texttt{CreateTable}, the test builds the expected SQL with the repository's own \texttt{BuildCreateTableSQL}, then declares the transaction expectations the service must satisfy (Listing~\ref{lst:pgxmock_ddl_assertion}):
+
+\begin{lstlisting}[language=Go, caption={Asserting the DDL, the transaction lifecycle, and the commit of \texttt{CreateTable} against a \texttt{pgxmock} pool.}, label={lst:pgxmock_ddl_assertion}]
+sql, err := repository.BuildCreateTableSQL(req)
+require.NoError(t, err)
+
+mock.ExpectBegin()
+mock.ExpectExec(regexp.QuoteMeta(sql)).
+    WillReturnResult(pgxmock.NewResult("CREATE TABLE", 0))
+mock.ExpectCommit()
+
+svc := tableSvcWithMock(t, mock)
+result, err := svc.CreateTable(context.Background(), req, uuid.New(), uuid.New())
+require.NoError(t, err)
+assert.Equal(t, int64(0), result.RowsAffected)
+\end{lstlisting}
+
+The assertions therefore cover three things at once: that the generated DDL matches what the repository produces, that the service wraps the statement in a transaction, and that it commits on success. Companion tests drive validation failures (illegal identifiers, malformed column definitions) and force \texttt{Exec} to return an error so the rollback branch is exercised --- for example, a duplicate-table case seeds \texttt{WillReturnError(\&pgconn.PgError\{Code: "42P07"\})} and asserts the service maps it to \texttt{ErrTableAlreadyExists} after an \texttt{ExpectRollback}.
+
+\subsection{The Schema-AI SSE Proxy}
+
+The most network-dependent handler is the Server-Sent Events proxy that streams schema suggestions from the upstream Schema-AI service. It is tested against an \texttt{httptest} upstream configured per case:
+
+\begin{itemize}
+    \item \textbf{Authorization and validation:} requests with no authenticated user or an invalid project ID are rejected before any upstream call.
+    \item \textbf{Upstream error:} when the stubbed upstream returns a non-2xx status or is unreachable, the proxy responds with \texttt{502 Bad Gateway}.
+    \item \textbf{Streamed success:} the upstream emits a \texttt{text/event-stream} body such as \texttt{data: \{"step":"start"\}} followed by \texttt{data: \{"step":"done"\}}; the test asserts the proxy preserves the \texttt{text/event-stream} content type and relays the events to the client.
+\end{itemize}
+
+This raised the proxy from 0\% to roughly 86\% coverage with the stream handler fully covered, all without a real AI backend.
+
+\subsection{MongoDB Collection Service via Cancelled Context}
+
+The MongoDB collection service is tested using the cancelled-context technique of Section~\ref{sec:test_design}. A test constructs the service over a \emph{lazily-connected} \texttt{*mongo.Database} (a client that has dialed nothing) and invokes operations --- \texttt{ListCollections}, \texttt{CreateCollection}, \texttt{DeleteCollection}, \texttt{AddField}, \texttt{RemoveField} --- with an already-cancelled context. Each call fails fast with a deterministic \texttt{server selection error: context canceled}, exercising the repository-error propagation branch with no network and no flakiness. A complementary case injects a \texttt{stubConn} that returns a seeded error, covering the distinct ``cannot obtain database'' branch. Together these lifted the collection service from 32.5\% to roughly 90\% coverage.

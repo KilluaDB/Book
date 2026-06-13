@@ -41,6 +41,36 @@
 
 \usepackage{tikz}
 \usepackage{float}             % for [H]
+
+% ----------------------------------------------------
+% Source-code listing style (used for Go test snippets)
+% ----------------------------------------------------
+\definecolor{lstbg}{rgb}{0.97,0.97,0.97}
+\definecolor{lstkw}{rgb}{0.13,0.29,0.53}
+\definecolor{lststr}{rgb}{0.55,0.13,0.13}
+\definecolor{lstcom}{rgb}{0.30,0.50,0.30}
+\lstdefinestyle{gostyle}{
+    language=Go,
+    backgroundcolor=\color{lstbg},
+    basicstyle=\ttfamily\footnotesize,
+    keywordstyle=\color{lstkw}\bfseries,
+    stringstyle=\color{lststr},
+    commentstyle=\color{lstcom}\itshape,
+    numberstyle=\tiny\color{gray},
+    numbers=left,
+    numbersep=8pt,
+    showstringspaces=false,
+    breaklines=true,
+    frame=single,
+    rulecolor=\color{gray!40},
+    framesep=4pt,
+    xleftmargin=14pt,
+    tabsize=4,
+    captionpos=b,
+}
+\lstset{style=gostyle}
+% Go keywords not in the default listings dialect
+\lstset{morekeywords={any,error,nil,string,int,int64,bool}}
 \usetikzlibrary{
     shapes.geometric,
     arrows.meta,
