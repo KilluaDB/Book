@@ -5,14 +5,14 @@
 \setlength{\tabcolsep}{4pt} 
 \renewcommand{\arraystretch}{1.5} 
 
-\begin{xltabular}{\textwidth}{|>{\centering\arraybackslash}p{0.7cm}|Y|Y|>{\centering\arraybackslash}p{1.7cm}|Y|Y|>{\centering\arraybackslash}p{1.8cm}|}
+\begin{xltabular}{\textwidth}{|c|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|c|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}X|c|}
     \hline
     \textbf{\#} & \centering\textbf{EVENT NAME} & \centering\textbf{TRIGGER} & \textbf{SOURCE} & \centering\textbf{USE CASE} & \centering\textbf{RESPONSE} & \textbf{DEST.} \\ \hline
     \endfirsthead 
 
     1 & Developer login to the system & 
     \begin{tabitem}
-        \item Developer's Info
+        \item Dev Info
         \item Login request
     \end{tabitem} & Developer & Login Developer & 
     \begin{tabitem}
@@ -47,7 +47,7 @@
     6 & Developer modifies Entities & 
     \begin{tabitem}
         \item Entities info
-        \item Create/Edit Entities
+        \item Edit Entities
     \end{tabitem} & Developer & Modify Entities & 
     \begin{tabitem}
         \item Query response msg
@@ -92,7 +92,7 @@
     12 & Developer deletes account & 
     \begin{tabitem}
         \item Delete request
-        \item Verification
+        \item Check info
     \end{tabitem} & Developer & Delete Account & 1. Permanent deletion of data & Developer \\ \hline
 
 \caption{System Event Table}
@@ -104,21 +104,21 @@
 \subsection{Activity Diagrams}
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/register_activity_diagram.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/register_activity_diagram.png}
         \caption{Register activity diagram}
         \label{fig:register_activity}
     \end{figure}
     
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/login_activity_diagram.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/login_activity_diagram.png}
         \caption{Login activity diagram}
         \label{fig:login_activity}
     \end{figure}
     
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/login_with_gmail_activity.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/login_with_gmail_activity.png}
         \caption{Login with g-mail activity diagram}
         \label{fig:login_with_gmail_activity}
     \end{figure}
@@ -132,161 +132,161 @@
     
    \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/23.Create_Project.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/23.Create_Project.png}
         \caption{Create project activity diagram}
         \label{fig:create_project_activity}
     \end{figure}
     
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/24.Delete_Database.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/24.Delete_Database.png}
         \caption{Delete project activity diagram}
         \label{fig:delete_project_activity}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/4.Create_Table.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/4.Create_Table.png}
         \caption{Create SQL table activity diagram}
         \label{fig:create_table_activity}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/5.Delete_table.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/5.Delete_table.png}
         \caption{Delete SQL table activity diagram}
         \label{fig:delete_table_activity}
     \end{figure}
 
     % \begin{figure}[H]
     %     \centering
-    %     \includegraphics{images/activity/6.Edit_Table.png}
+    %     \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/6.Edit_Table.png}
     %     \caption{Edit SQL table activity diagram}
     %     \label{fig:edit_table_activity}
     % \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/19.Add_Column.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/19.Add_Column.png}
         \caption{Add SQL column activity diagram}
         \label{fig:Add_Column}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/20.Drop_Column.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/20.Drop_Column.png}
         \caption{Drop SQL column activity diagram}
         \label{fig:Drop_Column}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/21.Create_Index.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/21.Create_Index.png}
         \caption{Create SQL index activity diagram}
         \label{fig:Create_Index}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/22.Drop_Index.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/22.Drop_Index.png}
         \caption{Drop SQL index activity diagram}
         \label{fig:Drop_Index}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/1.Insert_Row.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/1.Insert_Row.png}
         \caption{Insert SQL rows activity diagram}
         \label{fig:insert_rows_activity}
     \end{figure}
     
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/2.Delete_Row.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/2.Delete_Row.png}
         \caption{Delete SQL rows activity diagram}
         \label{fig:delete_rows_activity}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/3.Edit_Row.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/3.Edit_Row.png}
         \caption{Edit SQL rows activity diagram}
         \label{fig:edit_rows_activity}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/7.Execute_Query_from_Query_Editor.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/7.Execute_Query_from_Query_Editor.png}
         \caption{Execute SQL query activity diagram}
         \label{fig:Execute_Query_from_Query_Editor}
     \end{figure}
 
     % \begin{figure}[H]
     %     \centering
-    %     \includegraphics{images/activity/8.Execute_Query_via_Text2SQL_AI_Service.png}
+    %     \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/8.Execute_Query_via_Text2SQL_AI_Service.png}
     %     \caption{Execute SQL query via AI activity diagram}
     %     \label{fig:Execute_Query_via_Text2SQL_AI_Service}
     % \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/9.Create_Schema_via_Text2Schema_AI_Service.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/9.Create_Schema_via_Text2Schema_AI_Service.png}
         \caption{Create SQL schema via AI activity diagram}
         \label{fig:Create_Schema_via_Text2Schema_AI_Service}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/10.Create_collection.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/10.Create_collection.png}
         \caption{Create NoSQL collection activity diagram}
         \label{fig:Create_collection}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/11.Delete_Collection.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/11.Delete_Collection.png}
         \caption{Delete NoSQL collection activity diagram}
         \label{fig:Delete_Collection}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/13.Create_Document.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/13.Create_Document.png}
         \caption{Create NoSQL document activity diagram}
         \label{fig:Create_Document}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/14.Delete_Document.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/14.Delete_Document.png}
         \caption{Delete NoSQL document activity diagram}
         \label{fig:Delete_Document}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/15.Add_a_Field_in_a_Document.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/15.Add_a_Field_in_a_Document.png}
         \caption{Add a NoSQL field in a document activity diagram}
         \label{fig:Add_a_Field_in_a_Document}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/16.Delete_a_Field_in_a_Document.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/16.Delete_a_Field_in_a_Document.png}
         \caption{Delete a NoSQL field in a document activity diagram}
         \label{fig:Delete_a_Field_in_a_Document}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/17.Update_a_Field_in_a_Document.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/17.Update_a_Field_in_a_Document.png}
         \caption{Update a NoSQL field in a document activity diagram}
         \label{fig:Update_a_Field_in_a_Document}
     \end{figure}
 
     \begin{figure}[H]
         \centering
-        \includegraphics{images/activity/18.Filter_Tab_Data_Retrieval.png}
+        \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/activity/18.Filter_Tab_Data_Retrieval.png}
         \caption{Data retrieval via NoSQL filter activity diagram}
         \label{fig:Filter_Tab_Data_Retrieval}
     \end{figure}

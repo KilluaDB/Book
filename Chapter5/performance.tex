@@ -1,26 +1,67 @@
 \section{Performance Evaluation and Metrics}
+\label{sec:performance_evaluation}
 
-To validate the viability of the DBaaS platform as a production-grade system, a series of performance evaluations were conducted to measure infrastructure efficiency, provisioning latency, and proxy overhead.
+To validate the viability of the DBaaS platform, performance evaluations were conducted on the local \texttt{dbaas-local} k3d cluster used throughout this thesis. Measurements cover provisioning latency, PGProxy routing behavior, and idle tenant memory footprint.
+
+\subsection{Evaluation Methodology}
+
+All benchmarks were executed against the deployment produced by \texttt{start.sh} on a single-node k3d cluster (K3s) with CloudNativePG and the MongoDB Community Operator pre-installed. Hardware and software context for the runs documented here:
+
+\begin{itemize}
+    \item \textbf{Cluster:} k3d cluster \texttt{dbaas-local}, one server node.
+    \item \textbf{Tier under test:} \texttt{free} (0.5 CPU, 512 MiB memory request, 5 GiB storage).
+    \item \textbf{Provisioning samples:} five consecutive PostgreSQL project creations; timer starts at successful \texttt{POST /api/v1/projects} response and ends when project \texttt{status} becomes \texttt{running} (polled every two seconds).
+    \item \textbf{Query latency:} \texttt{pgbench} TPC-B-style workload (\texttt{-c 1 -j 1 -T 10}) executed inside the CNPG pod against database \texttt{app}.
+    \item \textbf{Memory footprint:} \texttt{kubectl top pods} RSS after the tenant pods reached steady \texttt{Running} state.
+\end{itemize}
+
+Managed cloud databases such as AWS RDS or Google Cloud SQL typically require several minutes to allocate compute, configure networking, and bootstrap storage \cite{aws_rds_provisioning}.\footnote{Provisioning duration varies by instance class, region, and high-availability options; the comparison here is qualitative.} The measurements below characterize the platform's local operator-driven path rather than a formal cloud SLA benchmark.
 
 \subsection{Database Provisioning Latency}
-Traditional managed database services (such as AWS RDS or Google Cloud SQL) typically require 5 to 10 minutes to allocate compute instances, configure networking, and bootstrap a replication cluster \cite{aws_rds_provisioning}. By leveraging the CloudNativePG operator and Kubernetes-native abstractions, the platform achieves extremely low latency in provisioning:
-\begin{itemize}
-    \item \textbf{Instantiation Speed:} From the moment a user initiates a "Create Project" request via the Flutter frontend, the Go backend generates the CRD, and the K8s operator schedules the underlying pods in an average of \textbf{35 to 45 seconds}.
-    \item \textbf{Zero-Downtime Readiness:} This timeframe is fully inclusive; it encapsulates the generation of cryptographic secrets, the attachment of Persistent Volume Claims (PVCs), and the instantiation of the PostgREST auto-API sidecar. 
-\end{itemize}
+
+Five free-tier PostgreSQL projects were created sequentially through the REST API. Time-to-\texttt{running} included namespace creation, Secret injection, CloudNativePG \texttt{Cluster} reconciliation, PVC binding, pod startup, and PostgREST sidecar deployment.
+
+\begin{table}[H]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|c|c|c|c|c|c|c|}
+    \hline
+    \textbf{Run} & 1 & 2 & 3 & 4 & 5 & \textbf{Mean} \\
+    \hline
+    Seconds to \texttt{running} & 20.4 & 26.5 & 26.4 & 30.5 & 30.5 & 26.9 \\
+    \hline
+    \end{tabular}
+    \caption{Provisioning latency on local k3d cluster (free tier, PostgreSQL)}
+    \label{tab:provisioning_latency}
+\end{table}
+
+The observed range was \textbf{20 to 31 seconds} with a mean of \textbf{26.9 seconds}. This includes secret generation, PVC attachment, database bootstrap, and PostgREST resource creation. Variation across runs reflects Kubernetes scheduling and storage binding jitter on a single-node development cluster.
 
 \subsection{PGProxy Routing Overhead}
-Because the PGProxy intercepts all external database traffic, it was imperative to ensure it did not introduce unacceptable latency bottlenecks. To empirically validate the proxy's performance, the official PostgreSQL benchmarking tool (\texttt{pgbench}) was executed under two conditions: a direct intra-cluster connection to the database pod, and an external connection routed through the PGProxy.
+
+PGProxy accepts external PostgreSQL TCP connections, performs TLS \texttt{ClientHello} inspection to extract SNI, and forwards the byte stream without terminating TLS \cite{go_net_performance}. This preserves end-to-end encryption between the client and CloudNativePG, which is required for SCRAM channel-binding compatibility.
+
+Inside the CNPG pod, a \texttt{pgbench} run with one client and a ten-second duration reported:
 
 \begin{itemize}
-    \item \textbf{Benchmarking Results:} The \texttt{pgbench} evaluation established a direct intra-cluster baseline latency of \textbf{12.7 milliseconds} per transaction. When routed externally through the PGProxy, the system imposed an almost negligible latency penalty (measured between \textbf{1.5 and 3.0 milliseconds} of overhead) per transaction when compared to the direct connection baseline.
-    \item \textbf{Zero-Copy Peeking:} This minimal overhead is achieved by implementing zero-copy TLS peeking on the \texttt{ClientHello} packet rather than full cryptographic termination, leveraging Go's highly optimized \texttt{net} and \texttt{io} standard libraries \cite{go_net_performance}.
-    \item \textbf{Throughput Efficiency:} The proxy's streaming architecture ensures that once the initial SNI resolution is complete, bytes are transparently piped between the client and the K8s pod at wire speed, ensuring high throughput for large analytical queries or \texttt{pg\_dump} backup streams without degrading queries per second (QPS).
+    \item \textbf{Average transaction latency:} 0.834 ms
+    \item \textbf{Throughput:} approximately 1{,}199 transactions per second
+    \item \textbf{Initial connection time:} 48.8 ms (one-time setup cost)
 \end{itemize}
+
+An external \texttt{pgbench} comparison through PGProxy requires TPC-B tables owned by the tenant \texttt{app} role; the benchmark tables initialized by the superuser inside the pod are not accessible to external application credentials. For that reason, proxy overhead is characterized architecturally: after SNI resolution, PGProxy pipes bytes between client and database with no cryptographic termination step. Connection-level tests through the external hostname (\texttt{db-<id>.postgres.<domain>}) confirmed successful TLS passthrough routing. The dominant cost for short queries remains PostgreSQL execution and network RTT rather than proxy inspection.
 
 \subsection{Resource Footprint of Idle Tenants}
-Multi-tenant density is a critical metric for DBaaS cost efficiency. To maximize the number of tenants per node, the base configuration of tenant databases is heavily optimized:
+\label{sec:resource_footprint}
+
+Multi-tenant density depends on how much memory an idle project consumes. For one idle free-tier PostgreSQL project measured with \texttt{kubectl top pods}:
+
 \begin{itemize}
-    \item \textbf{Minimal Memory Allocation:} A standard "Free Tier" idle PostgreSQL tenant running via CloudNativePG, alongside its PostgREST sidecar, consumes an astonishingly low \textbf{65MB to 80MB} of RAM combined. This extreme efficiency allows a single 16GB RAM worker node to comfortably host over \textbf{150 idle database clusters} simultaneously.
-    \item \textbf{Compute Quotas:} Strict Kubernetes CPU limits (e.g., \texttt{0.5 vCPU}) and memory quotas are enforced at the Namespace level, guaranteeing that a single noisy neighbor cannot monopolize the host cluster's resources and degrade performance for other users.
+    \item \textbf{CloudNativePG pod:} 86 MiB RSS
+    \item \textbf{PostgREST sidecar:} 25 MiB RSS
+    \item \textbf{Combined:} approximately 111 MiB per idle PostgreSQL project
 \end{itemize}
+
+On a worker node with 16 GiB of RAM, reserving roughly 2 GiB for the operating system, Kubernetes control-plane components, and database operators leaves about 14 GiB schedulable. At 111 MiB per idle stack, the node can host on the order of \textbf{120 to 130 idle free-tier PostgreSQL projects} before memory becomes the binding constraint. Actual density will be lower when projects execute queries, when storage caches grow, or when MongoDB projects (which run separate operator-managed replica-set pods) are mixed into the workload.
+
+CPU limits configured in the resource tier table (0.5 cores for \texttt{free}) prevent a single tenant from monopolizing compute even when many idle projects are bin-packed onto the same node.

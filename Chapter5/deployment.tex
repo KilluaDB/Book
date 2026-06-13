@@ -1,21 +1,58 @@
-\section{Deployment and CI/CD Pipeline}
+\section{Deployment and Runtime Environment}
 
-The transition from local development to a production-ready environment requires a robust, reproducible deployment strategy. To guarantee system reliability and rapid iteration, the DBaaS platform relies on containerization and an automated Continuous Integration/Continuous Deployment (CI/CD) pipeline.
+The backend is designed to run inside Kubernetes for local development and demonstration. The repository includes Docker, Kubernetes manifests, and setup scripts that create a local K3s cluster through k3d, install the required database operators, build the backend image, deploy the API, deploy the PostgreSQL proxy, and port-forward the services needed during development.
 
 \subsection{Containerization Strategy}
-Both the Control Plane (REST API Server) and Data Plane (PGProxy) are compiled into statically linked, highly optimized Go binaries. These binaries are packaged into ultra-lightweight \texttt{Alpine Linux} Docker images. This approach achieves several critical architectural goals:
+
+The backend image uses a multi-stage Docker build. The build stage is based on \texttt{golang:1.26-alpine}; it downloads Go modules and builds two statically linked Linux binaries:
+
 \begin{itemize}
-    \item \textbf{Minimal Attack Surface:} Utilizing stripped Alpine images (which possess a base size of approximately 5MB \cite{alpine_linux}) drastically reduces the number of underlying system libraries, thereby minimizing potential Common Vulnerabilities and Exposures (CVEs) associated with larger OS distributions.
-    \item \textbf{Rapid Scheduling:} The final compiled container images are extremely small (typically between 15MB to 20MB), enabling near-instantaneous image pulling and pod scheduling within the Kubernetes cluster, often completing in under 3 seconds over a standard Gigabit network.
-    \item \textbf{Environment Parity:} Dockerization guarantees that the microservices execute identically across local development, staging, and production environments, eliminating "works-on-my-machine" discrepancies.
+    \item \texttt{/api}: the main REST API server.
+    \item \texttt{/pgproxy}: the PostgreSQL TCP routing proxy.
 \end{itemize}
 
-\subsection{Continuous Integration and Delivery (CI/CD)}
-To facilitate rapid feature iteration while maintaining platform stability, the repository integrates tightly with automated CI/CD workflows:
+The runtime stage is based on Alpine Linux. In addition to the Go binaries, it installs CA certificates, PostgreSQL client tools, and MongoDB tools. These command-line tools are required by the backup and restore subsystem because PostgreSQL export/import uses \texttt{pg\_dump}, \texttt{pg\_restore}, and \texttt{psql}, while MongoDB export/import uses \texttt{mongodump} and \texttt{mongorestore}.
+
+\subsection{Local Kubernetes Deployment}
+
+The local deployment uses k3d to create a K3s cluster named \texttt{dbaas-local}. The setup script verifies prerequisites, creates or starts the cluster, configures TCP ports for HTTP, HTTPS, PostgreSQL, and MongoDB traffic, and installs the required operators.
+
+The local cluster contains the following platform components:
+
 \begin{itemize}
-    \item \textbf{Automated Testing and Linting:} Upon every code push, the pipeline automatically triggers static code analysis (via \texttt{golangci-lint}) and executes the suite of integration tests to ensure no regressions are introduced.
-    \item \textbf{Image Building and Registry Publishing:} Upon merging code to the primary branch, the pipeline builds the Docker images for both the API Server and PGProxy, tags them with semantic versioning, and securely pushes them to a remote container registry (e.g., Docker Hub).
+    \item \textbf{Backend API:} Runs in the \texttt{default} namespace and exposes the REST API.
+    \item \textbf{Meta PostgreSQL:} Stores users, projects, statuses, and platform metadata.
+    \item \textbf{Redis:} Stores refresh-token state and short-lived cached workflow data.
+    \item \textbf{CloudNativePG Operator:} Reconciles PostgreSQL tenant database clusters.
+    \item \textbf{MongoDB Community Operator:} Reconciles MongoDB tenant database clusters.
+    \item \textbf{Traefik:} Provides HTTP ingress and TCP routing entrypoints for direct database access.
+    \item \textbf{pgproxy:} Routes direct PostgreSQL client traffic to the appropriate project database.
 \end{itemize}
 
-\subsection{Infrastructure Provisioning}
-The foundational infrastructure hosting the DBaaS platform is deployed on a cloud virtual private server (VPS). A K3s (Lightweight Kubernetes) cluster is installed as the host orchestrator. By utilizing K3s—which bundles Kubernetes components into a single binary and replaces the heavy \texttt{etcd} data store with a lightweight SQLite backend \cite{k3s_architecture}—the platform reduces the control plane's minimum memory overhead to under 512MB. This significant resource reduction is achieved while maintaining 100\% compatibility with standard Kubernetes APIs, CRDs, and Helm charts.
+\subsection{Kubernetes Deployment Configuration}
+
+The backend runs as a Kubernetes \texttt{Deployment} in the \texttt{default} namespace with a single replica by default. The rollout strategy is \texttt{Recreate} rather than \texttt{RollingUpdate}, which avoids two API pods running concurrently during image upgrades but causes a brief API unavailability window on each deploy. This is acceptable for the local demonstration cluster; production deployments typically increase replica count and switch to rolling updates once multiple pods are configured.
+
+Required secrets and configuration are injected via a ConfigMap and Secret. Mandatory variables include database settings (host, port, user, password, dbname), Redis address, JWT secrets, and Google OAuth credentials. Optional settings include encryption keys, external domain, AI base URL, and Text-to-SQL flags.
+
+The ServiceAccount \texttt{backend} is bound to ClusterRole \texttt{backend-db-manager} via \texttt{deploy/rbac.yaml}, granting the API permission to create per-project namespaces and provision operator-managed resources inside them.
+
+\subsection{Startup Script Workflow}
+
+The \texttt{start.sh} script performs the local runtime deployment. It loads environment variables from \texttt{.env}, applies ConfigMaps and Secrets, deploys the meta PostgreSQL and Redis instances, builds the backend Docker image, imports the image into k3d, applies RBAC and Kubernetes manifests, restarts the backend Deployment, deploys \texttt{pgproxy}, optionally imports Grafana dashboards, and starts port-forwarding for local access.
+
+This script is a reproducible local deployment pipeline. It is not a full production CI/CD system by itself because it builds and deploys from the developer machine rather than from a remote build runner and registry.
+
+\subsection{Production Deployment Considerations}
+
+A production deployment should keep the same architectural boundaries but replace local-development assumptions with managed or hardened infrastructure:
+
+\begin{itemize}
+    \item Use a managed or highly available meta PostgreSQL deployment.
+    \item Use stable, externally managed Redis or a highly available Redis deployment.
+    \item Store secrets in a production-grade secret-management workflow.
+    \item Run the backend with the minimum Kubernetes RBAC needed for namespace and database provisioning.
+    \item Terminate public HTTPS at an ingress controller or load balancer.
+    \item Configure persistent storage classes with appropriate backup, IOPS, and retention policies.
+    \item Publish versioned container images through a registry-backed CI/CD pipeline before deployment.
+\end{itemize}

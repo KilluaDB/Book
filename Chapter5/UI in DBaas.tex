@@ -8,7 +8,7 @@ To construct a highly responsive, single-codebase application capable of renderi
 
 Table~\ref{tab:flutter_comparison} summarizes the architectural justifications for selecting Flutter over conventional DOM-based web technologies for this specific DBaaS use case.
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering
 \caption{Comparison of Flutter Web with Other Web Technologies}
 \label{tab:flutter_comparison}
@@ -36,9 +36,9 @@ Easy to Learn & \ding{55} & \ding{55} & \ding{55} & \ding{51} \\
 \end{tabular}
 \end{table}
 \newpage
-\section{Completed and Under Development Features}
+\section{Platform Features and UI Coverage}
 
-This section highlights the core functional modules of the DBaaS platform that have been successfully implemented and verified.
+This section highlights the functional modules exposed through the Flutter frontend and notes areas where UI coverage is still partial relative to the backend API.
 
 \subsection{Implemented Features}
 
@@ -245,3 +245,16 @@ Beyond database operations, the platform includes a full settings dashboard wher
     \includegraphics[width=0.9\textwidth]{images/settings_full_screen.png}
     \caption{System-wide settings and personalization interface.}
 \end{figure}
+
+\subsection{Partially Covered Backend Features}
+
+Several backend capabilities are implemented in the API but not yet represented with dedicated UI screenshots in this chapter:
+
+\begin{itemize}
+    \item \textbf{MongoDB workspace:} Collection and document management endpoints exist under project-specific routing paths, but the UI coverage shown here focuses primarily on PostgreSQL workflows (schema editor, SQL query editor, table management).
+    \item \textbf{Google OAuth login:} The backend exposes \texttt{/auth/google/login} and callback routes; the Flutter client supports OAuth as an alternative to email-and-password registration.
+    \item \textbf{Project access and PostgREST:} External connection strings and PostgREST credentials are available through the project access API; direct-client integration is primarily documented in the backend chapters.
+    \item \textbf{Backup export/import:} Streaming backup endpoints are implemented server-side; the UI may expose these through project settings depending on the client build under test.
+\end{itemize}
+
+These gaps reflect incremental frontend delivery rather than missing backend functionality. They are noted so readers can distinguish between platform capability (API + operators) and presentation-layer completeness (Flutter screens documented here).

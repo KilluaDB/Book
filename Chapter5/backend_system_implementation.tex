@@ -1,117 +1,417 @@
-\section{Technology Stack}
+\section{Backend System Implementation}
 
-The backend of the DBaaS platform is constructed using a modern, cloud-native technology stack carefully selected to optimize for scalability, fault tolerance, and secure infrastructure orchestration. The foundational technologies include:
+This section describes how the backend design is implemented in the Go codebase. The implementation follows the same control-plane and data-plane split described in Chapter~\ref{chap:system_design}: the Go API owns orchestration, identity, metadata, and execution control, while Kubernetes operators own the lifecycle of tenant database pods and storage.
+
+\subsection{Technology Stack and Selection Rationale}
+
+The backend is implemented in Go, targeting version \texttt{1.26.0}. Go was selected over interpreted alternatives due to its static typing, compilation to a single binary, and negligible runtime overhead. Crucially for a control-plane architecture, Go provides lightweight concurrency primitives (goroutines) that efficiently manage thousands of concurrent HTTP requests, background reconciliation loops, and persistent database connection pools without blocking the main execution thread.
+
+\subsubsection{Core Framework and Libraries}
+The API layer utilizes the Gin HTTP framework. Gin was chosen for its zero-allocation request routing, robust middleware pipeline (used extensively for JWT validation and telemetry), and efficient JSON binding. 
+
+For database connectivity, the platform bypasses heavy Object-Relational Mappers (ORMs) to minimize abstraction overhead and retain explicit control over connection pooling. PostgreSQL interactions use \texttt{pgx} and \texttt{pgxpool}, selected over standard library database/sql adapters for their native support of PostgreSQL-specific features (e.g., binary format encoding) and advanced pool lifecycle management. MongoDB access is managed via the official MongoDB Go driver.
+
+Authentication relies on \texttt{github.com/golang-jwt/jwt/v5} for stateless, cryptographically signed Access Tokens. Refresh-token state is maintained in Redis rather than the primary meta-database; Redis was selected for this role because its native Time-To-Live (TTL) eviction mechanism automatically purges expired tokens, eliminating the need for application-level cleanup jobs.
+
+\subsubsection{Kubernetes Client Integration}
+The platform eschews external CLI tools (such as Helm or \texttt{kubectl}) in favor of the official Kubernetes Go client (\texttt{client-go}). This decision ensures the backend can natively watch API server events and perform programmatic polling without shelling out to external processes. The \textit{dynamic client} is utilized to manage Custom Resources (CloudNativePG \texttt{Cluster}, \texttt{MongoDBCommunity}, and Traefik \texttt{IngressRouteTCP}) without requiring hardcoded Go structs, ensuring resilience to operator version updates. Simultaneously, the \textit{typed client} provides compile-time safety for core resources like Namespaces and Secrets.
+
+\subsubsection{Observability Stack}
+The backend instrumentation relies on the \texttt{prometheus/client\_golang} library, exposing metrics on an isolated server (port \texttt{9090}) to prevent monitoring scrapes from competing with user API traffic. Prometheus was selected as the telemetry standard due to its native Kubernetes integration. HTTP metrics use the \texttt{killuadb\_api\_*} prefix (e.g., total requests and duration). Database metrics use \texttt{backend\_pg\_*}, \texttt{backend\_mongo\_*}, and provisioning counters. Grafana dashboards consume these series during local operation.
+
+\subsection{Dual Database Engine Implementation}
+
+The engine-selection rationale is documented in Chapter~\ref{chap:system_design}. In code, shared project lifecycle logic lives in platform services while engine-specific behavior is separated into the \texttt{internal/postgres} and \texttt{internal/mongodb} packages.
+
+\subsubsection{PostgreSQL Implementation Path}
+
+PostgreSQL is implemented as the relational path. The backend uses \texttt{pgx} and \texttt{pgxpool} for tenant SQL connections, CloudNativePG for provisioning, and PostgreSQL client tools for backup and restore.
+
+The PostgreSQL path includes:
 
 \begin{itemize}
-    \item \textbf{Go (Golang):} Selected as the primary backend systems language due to its high-performance concurrency primitives, minimal memory footprint, and native interoperability with the Kubernetes ecosystem.
-    \item \textbf{Flutter:} Utilized for the frontend client to deliver a highly responsive, single-codebase user interface. Its reactive state management is ideal for complex data visualization and real-time database dashboard interactions.
-    \item \textbf{Kubernetes (K3s):} Serves as the core container orchestration engine. K3s provides a lightweight, highly available control plane capable of dynamically provisioning isolated tenant namespaces and enforcing strict resource quotas.
-    \item \textbf{CloudNativePG and MongoDB Operators:} Specialized Kubernetes controllers utilized to abstract the complex architectural lifecycles of relational (PostgreSQL) and document (MongoDB) clusters, handling replication, self-healing, and persistent volume provisioning autonomously.
-    \item \textbf{Traefik Ingress Controller:} A dynamic HTTP reverse proxy that natively integrates with the Kubernetes API to provide automated request routing and cryptographic security for dynamically generated PostgREST endpoints.
-    \item \textbf{Redis:} Deployed as an advanced in-memory data structure store to enforce high-throughput, distributed session management and stateless JWT token rotation.
-    \item \textbf{PostgREST:} Deployed as an automated sidecar alongside PostgreSQL instances to instantly expose tenant data via a secure, performant REST API.
+    \item schema inspection and schema visualization;
+    \item table, column, row, and index operations;
+    \item SQL query execution through the query service;
+    \item Text-to-SQL execution after backend validation;
+    \item query-history retrieval through \texttt{pg\_stat\_statements};
+    \item PostgREST resource creation for projects that expose an HTTP API over relational tables;
+    \item \texttt{pg\_dump}, \texttt{psql}, and \texttt{pg\_restore} based backup and restore.
 \end{itemize}
 
-\section{Project Directory Structure}
+This path is optimized for structured data, relational constraints, SQL workflows, and users who need standard PostgreSQL tooling.
 
-The codebase strictly adheres to standard Go project layouts and principles of Clean Architecture. 
+\subsubsection{MongoDB Implementation Path}
+
+MongoDB is implemented as the document path. The backend uses the official MongoDB Go driver, the MongoDB Community Operator for provisioning, and MongoDB database tools for backup and restore.
+
+The MongoDB path includes:
 
 \begin{itemize}
-    \item \texttt{cmd/api/main.go}: The single entry point for the application. It initializes the environment, invokes the server constructor, blocks on HTTP listener execution, and orchestrates graceful shutdown by intercepting \texttt{SIGINT}/\texttt{SIGTERM} signals and invoking \texttt{server.CloseResources()}.
-    \item \texttt{internal/server/server.go}: Contains \texttt{NewServer()}, the centralized dependency injection graph. All database connections, repositories, services, and handlers are explicitly wired here. The project intentionally avoids reflection-based DI frameworks to ensure compile-time safety and rapid startup.
-    \item \texttt{internal/database/}: Contains \texttt{EnsureDatabaseExists()} to autonomously bootstrap the meta-database, and \texttt{RunMigrations()}, which sequentially executes the idempotent SQL migrations. No third-party migration library is utilized; raw SQL DDL strings are executed natively.
-    \item \texttt{internal/service/}: Contains the core business logic.
-    \begin{itemize}
-        \item \texttt{auth\_service.go}: Manages token issuance and rotation.
-        \item \texttt{project\_service.go}: Handles the API workflow for creating and deleting database projects.
-        \item \texttt{operator\_provisioner.go}: The translation layer that converts high-level project intents into declarative Kubernetes API payloads.
-        \item \texttt{instance\_dsn\_service.go}: Securely resolves database connection strings (DSNs) by directly fetching credentials from Kubernetes Secrets.
-    \end{itemize}
-    \item \texttt{internal/handler/}: The HTTP transport layer. It contains Gin handlers that translate HTTP JSON requests to Service-layer Data Transfer Objects (DTOs).
-    \item \texttt{internal/postgres/} and \texttt{internal/mongodb/}: Domain-specific implementations for polymorphic database routing. Each contains its own \texttt{infra/} connection manager, \texttt{service/} layer, and \texttt{handler/} layer to achieve a strict Separation of Concerns.
-    \item \texttt{internal/backup/}: Handles the orchestration of database exports and imports by streaming OS binary execution pipes directly to HTTP interfaces.
+    \item collection creation and deletion;
+    \item document insertion, update, deletion, filtering, and pagination;
+    \item dashboard metrics for collection and document-level usage;
+    \item direct driver-based REST handling without a PostgREST sidecar;
+    \item \texttt{mongodump} and \texttt{mongorestore} based backup and restore.
 \end{itemize}
 
-\section{Startup and Shutdown Sequence}
+This path is optimized for JSON-like documents, rapidly changing data shapes, and nested application data.
 
-The lifecycle of the backend service is rigidly deterministic. Tracing the execution from \texttt{main.go} into \texttt{NewServer()} reveals the following startup sequence:
+\subsubsection{Shared Lifecycle, Separate Data Semantics}
+
+Both engines share project creation, ownership checks, resource-tier validation, status transitions, namespace isolation, credential resolution, and backup dispatching. However, table operations are not forced onto MongoDB, and document operations are not forced onto PostgreSQL. This separation keeps each engine's API close to its natural data model while still giving users one platform-level workflow for provisioning and management.
+
+\subsection{Application Initialization and Dependency Graph}
+
+The server is initialized manually rather than through a reflection-based dependency injection framework. Startup validates required environment variables, ensures the meta-database exists, connects to PostgreSQL, runs migrations, initializes Redis, constructs repositories, constructs services, constructs handlers, and finally registers the Gin routes.
+
+The dependency direction is explicit:
+
+\begin{itemize}
+    \item Repositories receive the meta-database pool.
+    \item Services receive repositories, provisioners, and connection managers.
+    \item Handlers receive services.
+    \item Routes receive handlers and middleware.
+\end{itemize}
+
+Manual construction makes dependency changes visible at compile time. If a constructor signature changes, the server initialization code fails to compile until the graph is updated.
+
+\subsection{HTTP Server Configuration}
+
+The API server uses explicit transport settings. The read-header timeout is set to 10 seconds to reduce exposure to slow-header attacks. Full read and write timeouts are disabled because backup export/import and AI streaming endpoints may keep connections open for long periods. Long-running handlers are expected to rely on request contexts and service-specific deadlines.
+
+Prometheus metrics are served on port \texttt{9090}, separate from the main application port. This prevents monitoring scrapes from competing with normal API routing configuration and allows the metrics endpoint to be exposed or port-forwarded independently.
+
+\subsection{Asynchronous Project Provisioning Implementation}
+
+Project creation is implemented as an asynchronous workflow in \texttt{ProjectService}. The service validates the authenticated user identifier, validates the tenant password, normalizes \texttt{postgres}, \texttt{postgresql}, \texttt{sql}, \texttt{mongodb}, and \texttt{nosql} aliases into internal database types, and validates the selected tier.
+
+After validation, the service inserts a project row into the meta-database. The project starts in the \texttt{creating} state. The service then starts a background goroutine that calls the operator provisioner:
 
 \begin{enumerate}
-    \item \textbf{Environment Initialization}: \texttt{godotenv} implicitly loads the \texttt{.env} file. \texttt{validateRequiredEnvVars()} is immediately invoked, failing fast if any required configuration variables are missing.
-    \item \textbf{Database Bootstrapping}: \texttt{database.EnsureDatabaseExists()} connects as an admin to verify the application database exists. Subsequently, \texttt{database.Connect()} initializes the primary \texttt{pgxpool.Pool}.
-    \item \textbf{Migration Execution}: \texttt{database.RunMigrations()} executes the idempotent SQL migrations.
-    \item \textbf{Kubernetes Discovery}: \texttt{service.NewOperatorProvisioner()} attempts to load an \texttt{InClusterConfig}. If the binary is executing locally, it natively falls back to parsing \texttt{\textasciitilde/.kube/config}.
-    \item \textbf{Dependency Wiring}: The complete tree of repositories, services, and middleware is manually constructed. This includes wiring the Redis client into the authorization service graph.
-    \item \textbf{Listener Activation}: An \texttt{http.Server} is instantiated with strict timeouts: \texttt{IdleTimeout} of 1 minute, \texttt{ReadHeaderTimeout} of 10 seconds, while \texttt{ReadTimeout} and \texttt{WriteTimeout} are disabled (\texttt{0}) to permit the handlers to manage long-running data streaming deadlines.
+    \item The HTTP request returns the project metadata immediately.
+    \item The background provisioning context is bounded by a timeout.
+    \item On success, the project runtime status is updated to \texttt{running}.
+    \item On failure, the status is updated to \texttt{failed}.
 \end{enumerate}
 
-Upon receiving an OS termination signal, the graceful shutdown sequence initiates:
-\begin{enumerate}
-    \item The signal channel intercepts \texttt{SIGINT} or \texttt{SIGTERM}.
-    \item \texttt{srv.Shutdown(ctx)} is invoked with a 5-second deadline, allowing in-flight HTTP requests to drain.
-    \item \texttt{server.CloseResources()} is called, sequentially triggering \texttt{CloseAll()} on the Postgres and MongoDB Connection Managers to flush the active connection pools, followed by \texttt{database.Close()} for the Meta-DB.
-\end{enumerate}
+This implementation avoids HTTP gateway timeouts during database creation. It also makes the frontend responsible for displaying and refreshing project status while the Kubernetes operators reconcile the requested resources.
 
-\section{Authentication Implementation}
+\subsection{Operator Provisioner Implementation}
 
-\subsection*{Cryptographic Memory Sanitization}
-The implementation of user registration in \texttt{auth\_service.go} strictly enforces security primitives:
-\begin{enumerate}
-    \item The user's password string is cryptographically hashed using \texttt{bcrypt} via \texttt{utils.Hash()}. 
-    \item Immediately following the hash generation, the plain-text password field in the memory struct is explicitly overwritten: \texttt{user.Password = ""}. This manual memory management prevents the raw credential from lingering in heap space, mitigating memory dumping attacks.
-    \item The record is inserted into the \texttt{users} table.
-    \item The JWT token pair is generated and the refresh token is stored in Redis via \texttt{redisClient.Set()} to enable instantaneous global revocation.
-\end{enumerate}
+The \texttt{OperatorProvisioner} is the implementation boundary between the Go domain and the Kubernetes API server. It creates deterministic resource names from the project UUID:
 
-\subsection*{OAuth Integration}
-The Google OAuth flow implemented in \texttt{google\_auth\_service.go} builds a stateful redirect URI. Upon receiving the Google callback containing the authorization \texttt{code}, the backend exchanges it for a Google token, fetches the user's profile, and implicitly upserts the user into the Meta-DB, yielding a standard platform JWT pair identical to the password-based login.
+\begin{itemize}
+    \item PostgreSQL namespace: \texttt{pg-<uuid-without-dashes>}
+    \item MongoDB namespace: \texttt{mongo-<uuid-without-dashes>}
+    \item Database resource name: \texttt{db-<uuid-without-dashes>}
+\end{itemize}
 
-\section{Kubernetes Provisioner Implementation}
+\subsubsection{PostgreSQL Provisioning}
+For PostgreSQL projects, the provisioner creates the project namespace, writes the application user's password to a Kubernetes Secret, and creates a CloudNativePG \texttt{Cluster}. Readiness is determined from the cluster status field that reports ready instances. The generated cluster configuration enables \texttt{pg\_stat\_statements} for observability and uses the project's resource tier to set CPU, memory, and storage.
 
-The \texttt{OperatorProvisioner} acts as the exclusive translation bridge between Go structs and the Kubernetes cluster state.
+After the database is ready, the backend configures PostgREST support. It creates database roles, generates PostgREST credentials, and creates the PostgREST Secret, Deployment, Service, and optional HTTP IngressRoute. The project access endpoint (\texttt{GET /api/v1/projects/:id/access}) returns \texttt{postgrest\_url}, \texttt{api\_key}, and \texttt{jwt\_secret} alongside the PostgreSQL connection string when external access is configured.
 
-\subsection*{Dynamic Client Construction}
-To interface with custom operators, the provisioner relies entirely on the \texttt{k8s.io/client-go/dynamic} package. The backend manipulates Custom Resources (CRs) using the \texttt{unstructured.Unstructured} wrapper. For example, creating a CloudNativePG cluster involves constructing a deep \verb|map[string]interface{}| defining the \texttt{spec.instances} and \texttt{spec.storage.size}. This architectural decision guarantees that the backend binary does not require tightly coupled, compiled dependencies on specific operator SDK versions, drastically simplifying dependency management and upgrades.
+\subsubsection{MongoDB Provisioning}
+For MongoDB projects, the provisioner creates the namespace, ServiceAccount, RoleBinding, password Secret, and \texttt{MongoDBCommunity} custom resource. The MongoDB operator then reconciles the database pods and services. Readiness is determined by polling the custom resource phase until it reports a running state.
 
-\subsection*{PostgREST TLS Ingress Configuration}
-During the fulfillment phase of PostgreSQL provisioning, the Go provisioner automatically generates an API sidecar. To secure data-in-transit, the backend invokes \texttt{createPostgRESTIngressRoute()}, which natively templates a Traefik \texttt{IngressRoute} Custom Resource. The Go map is explicitly configured with a \verb|tls: {}| section, instructing the Traefik proxy to dynamically intercept, terminate HTTPS requests, and route the unencrypted HTTP traffic to the isolated PostgREST pod within the tenant's namespace.
+\subsubsection{Failure and Idempotency}
+If readiness polling fails, the provisioner deletes the project namespace. Kubernetes garbage collection then removes contained resources such as Secrets, Services, StatefulSets, and PersistentVolumeClaims. If the Kubernetes API reports that a resource already exists, the provisioner treats the operation as retry-safe and continues to readiness polling rather than creating a duplicate instance.
 
-\section{Connection Management Implementation}
+\subsection{External Database Access Implementation}
 
-The \texttt{ConnectionManager} handles thousands of ephemeral database connections. The core retrieval method, \texttt{acquireCachedPool()}, utilizes a highly optimized Mutex lock pattern:
+External database access is optional and depends on the external domain configuration.
 
-\begin{verbatim}
-s.pgPoolMu.Lock()
-// Check cache for existing projectID...
-s.pgPoolMu.Unlock()
-// If miss: connectAndCachePool() executes without blocking the global mutex
-\end{verbatim}
+PostgreSQL direct access is handled by the \texttt{pgproxy} binary, which is built from the same Docker image as the API server. The proxy is deployed separately and receives TCP traffic through Traefik. It derives the target namespace and service from the requested project hostname. This avoids creating one PostgreSQL TCP route per project.
 
-By explicitly releasing the lock prior to invoking the blocking \texttt{pgxpool.New()} network call, the manager ensures that a slow TCP handshake to \texttt{Project A} does not serialize and block concurrent queries targeting \texttt{Project B}. The \texttt{pgxpool} defaults are retained, allocating a maximum of 4 concurrent connections per tenant pool.
+MongoDB direct access uses per-project Traefik \texttt{IngressRouteTCP} resources. The route matches the project's MongoDB hostname and forwards TCP traffic with TLS passthrough enabled to the project service.
 
-\section{Query Execution and AI Integration}
+\subsection{Connection Pool Management Implementation}
 
-\subsection*{Query Bounding and Telemetry}
-The query execution engine in \texttt{query\_service.go} parses incoming SQL. To enforce the global resource protection policy, the service dynamically injects a \texttt{LIMIT 50} clause if no limit is present before transmission to the database.
+The PostgreSQL connection manager caches \texttt{pgxpool.Pool} instances by project UUID. A cached entry stores both the pool and the DSN used to create it. On each access, the manager resolves the current DSN and compares it with the cached value. If the DSN changed, the old pool is evicted and a new pool is created.
 
-Furthermore, historical query telemetry is extracted seamlessly via PostgreSQL's native \texttt{pg\_stat\_statements} extension. The Go implementation of \texttt{GetQueryHistory()} executes system queries to return comprehensive metrics, including mean execution time, rows affected, and shared buffer cache hit ratios.
+Cached PostgreSQL pools are configured with:
 
-\subsection*{Dynamic Multi-Model LLM Routing}
-The AI schema generation implementation dynamically resolves target models based on provider prefixes (e.g., \texttt{openrouter/}, \texttt{google/}). To authenticate against external providers (DeepSeek, Google AI Studio) without hardcoding credentials in the application image, the backend reads the API keys directly from a Kubernetes Secret mounted via environment variables during pod initialization. It then constructs the specialized HTTP client headers on the fly before establishing the Server-Sent Events (SSE) stream back to the client.
+\begin{itemize}
+    \item maximum connections: 5
+    \item minimum connections: 1
+    \item maximum connection lifetime: 5 minutes
+    \item maximum idle time: 1 minute
+    \item direct query execution mode
+\end{itemize}
 
-\section{Backup and Streaming Implementation}
+Before returning a cached pool, the manager pings it with a short timeout. The implementation releases the global cache lock before the network ping, preventing a slow tenant database from blocking unrelated projects. A background task runs every 15 seconds to emit pool metrics and evict pools whose total connection count has dropped to zero.
 
-The disaster recovery engine in \texttt{internal/backup/} implements a highly scalable, zero-disk-I/O streaming architecture. 
+MongoDB uses a parallel connection-manager concept with cached MongoDB clients and driver-level pooling.
 
-During an export request, the backend executes the \texttt{pg\_dump} binary inside the cluster network via \texttt{exec.CommandContext()}. The \texttt{Stdout} pipe of the underlying OS process is copied directly to the Gin \texttt{ResponseWriter}. The Go handler mutates response headers in real-time (e.g., serving \texttt{Content-Type: application/sql} for plain dumps).
+\subsection{Authentication and Session Management}
 
-During an import, a strict 30-minute context deadline (\texttt{importMaxDuration}) is enforced. The client's HTTP request body (\texttt{c.Request.Body}) is piped synchronously into the \texttt{Stdin} of the \texttt{pg\_restore} or \texttt{mongorestore} process execution.
+User passwords are hashed with Argon2id from \texttt{golang.org/x/crypto/argon2}. The encoded hash stores the algorithm parameters, salt, and derived key so verification can recompute the hash with the same parameters. The service clears the plain password field after hashing so it is no longer retained in the user model, although Go string memory cannot be guaranteed to be overwritten in place.
 
-\section{Deployment Implementation}
+Platform registration validates passwords with a minimum length of six characters at the handler layer (\texttt{binding:"required,min=6"}). Tenant database passwords are validated separately through \texttt{utils.ValidatePassword}, which enforces at least twelve characters plus uppercase, lowercase, digit, and special-character requirements before a project row is created.
 
-The transition to production is codified within the shell automation pipelines.
+The login and registration workflows issue two tokens:
 
-\subsection*{Containerization and Execution}
-The application is compiled using a multi-stage Dockerfile that builds the Go binary and packages it into an ultra-minimal Alpine Linux runtime layer \cite{alpine_linux} lacking an internal shell or package manager, drastically reducing the attack surface.
+\begin{itemize}
+    \item \textbf{Access token:} a short-lived JWT with a 15-minute lifetime.
+    \item \textbf{Refresh token:} a 30-day JWT persisted in Redis with the same TTL and set as an httpOnly cookie on successful login or registration.
+\end{itemize}
 
-The \texttt{start.sh} script deploys the application into the cluster. It dynamically generates the \texttt{backend-secrets} Secret by interpolating the host's \texttt{.env} file. Finally, it applies the \texttt{deploy/rbac.yaml} manifests, granting the backend's \texttt{ServiceAccount} specific, namespace-scoped privileges strictly limited to manipulating \texttt{postgresql.cnpg.io} clusters, \texttt{IngressRoutes}, and core \texttt{secrets}.
+Refresh-token rotation deletes the old Redis entry before issuing a new token pair. Logout deletes the refresh token from Redis, preventing it from being used again to obtain access tokens.
+
+\subsubsection{Google OAuth2 Implementation}
+Google OAuth is wired through \texttt{GoogleAuthService} and \texttt{internal/config/oauth.go}. The login endpoint (\texttt{/api/v1/auth/google/login}) issues an HTTP 307 redirect to Google's authorization URL. The callback exchanges the authorization code, fetches verified email from Google's userinfo API, upserts the user record, and returns an access token. OAuth users follow the same project ownership and role rules as password-authenticated users.
+
+\subsection{Query Execution and Safety Constraints}
+
+The query service executes SQL only after validation. The validator rejects multi-statement input and blocks destructive operations such as \texttt{DROP DATABASE}, \texttt{DROP SCHEMA}, \texttt{TRUNCATE}, \texttt{ALTER DATABASE}, \texttt{CREATE DATABASE}, and \texttt{CREATE SCHEMA}. It also rejects unguarded \texttt{DELETE FROM} statements that do not include a \texttt{WHERE} clause; guarded deletes are permitted.
+
+The server constructs \texttt{QueryService} with \texttt{maxPostgresQueryLimit = 50}, but the LIMIT-enforcement logic in \texttt{ValidateSQLQuery} is currently commented out. As implemented, the primary safety boundary is statement classification rather than automatic row caps on \texttt{SELECT} results.
+
+Query history is derived from \texttt{pg\_stat\_statements} inside the tenant PostgreSQL database. The endpoint checks whether the extension exists and filters system-generated queries so the user sees application-level query statistics such as call count and mean execution time.
+
+\subsection{AI Service Integration}
+
+The Go backend integrates with external AI services through HTTP.
+
+\subsubsection{Schema Generation}
+The schema generation handler validates the authenticated request and proxies it to the configured schema AI base URL. The streaming endpoint sets \texttt{text/event-stream}, disables buffering where possible, reads chunks from the upstream response, writes them to the client, and flushes after each chunk. The non-streaming endpoint waits for the upstream JSON response, caches generated DDL in Redis under \texttt{pending\_schema:<project-id>} (one-hour TTL), and applies it only after the user calls \texttt{POST .../schema/approve}.
+
+The current backend forwards a \texttt{model\_name} value to the AI service but does not itself implement provider selection, provider-key lookup, or multi-agent orchestration. Those responsibilities are external to the Go backend.
+
+\subsubsection{Text-to-SQL}
+The Text-to-SQL service resolves the tenant DSN, parses the host, port, username, and password, and sends them with the user's natural-language question to the configured FastAPI service. The generated SQL is then executed through the normal query service. This means AI output is not directly trusted; it goes through the same backend validation and database execution path as a manually submitted query.
+
+\subsection{Backup and Restore Implementation}
+
+The backup subsystem dispatches by project database type.
+
+\subsubsection{PostgreSQL Export}
+PostgreSQL export runs \texttt{pg\_dump} and streams standard output to the HTTP response. Plain SQL dumps are filtered line-by-line to remove extension statements that would fail during restore under the unprivileged application role. The filter is disabled inside \texttt{COPY ... FROM stdin} blocks so row data is preserved byte-for-byte.
+
+\subsubsection{PostgreSQL Import}
+PostgreSQL import auto-detects the dump format by peeking at the first five bytes of the request body. If the stream starts with the \texttt{PGDMP} custom-format header, the backend uses \texttt{pg\_restore}; otherwise, it uses the plain SQL restore path.
+
+Plain SQL import streams the request body into the restore process. Custom-format import is different: the backend writes the archive to a temporary file, runs \texttt{pg\_restore --list}, filters extension entries from the table of contents, and restores using the filtered list. This temporary-file step is required because custom-format archives must be seekable for TOC inspection.
+
+\subsubsection{MongoDB Backup and Restore}
+MongoDB export runs \texttt{mongodump --archive --gzip} and streams the archive to the response. MongoDB import streams the request body into \texttt{mongorestore --archive --gzip --drop}.
+
+Backup errors are passed through credential-redaction logic before they are returned or logged, reducing the risk of leaking passwords from connection strings.
+
+\subsection{Observability and Telemetry}
+
+HTTP middleware tracks API request counts and durations for application endpoints, bypassing health checks to reduce noise. Provisioning metrics record instance creation, deletion, current instance counts, readiness wait duration, and non-fatal sub-resource failures such as PostgREST or ingress creation errors.
+
+The provisioner also runs a periodic collector that lists database custom resources and reconciles instance gauges. Connection managers emit \texttt{backend\_pg\_pool\_*} and \texttt{backend\_mongo\_*} gauges for pool counts, acquired and idle connections, and ping latency histograms.
+
+\subsection{Shutdown Behavior}
+
+The API process handles \texttt{SIGINT} and \texttt{SIGTERM} by calling \texttt{http.Server.Shutdown} with a bounded timeout. After the HTTP server stops accepting new requests, the backend closes cached PostgreSQL pools, cached MongoDB clients, and the meta-database pool. Some background goroutines are process-lifetime tasks rather than explicitly cancellable workers, so they terminate with the process after shutdown completes.
+
+\subsection{Current Implementation Limitations}
+
+The as-built backend targets local demonstration and thesis evaluation rather than multi-region production. Notable constraints include: a default Deployment of one API replica with \texttt{strategy: Recreate}; permissive CORS; no request rate limiting; meta-database TLS disabled in the local manifest; and ClusterRole-scoped Kubernetes permissions required for per-project namespace creation. These are intentional simplifications for reproducible k3d deployment and are called out so operators know which controls to add before production exposure.
+
+\section{Distributed Architecture and Horizontal Scalability}
+
+The backend architecture supports horizontal scaling at the API layer because most request handlers are stateless. Project metadata is stored in PostgreSQL, refresh-token state is stored in Redis, tenant credentials are resolved from Kubernetes Secrets, and tenant database state lives inside the provisioned database instances. A backend pod can therefore be replaced or replicated without migrating tenant data, although each replica still maintains its own in-memory connection caches.
+
+\subsection{Scaling by Configuration}
+
+The first scaling step is a configuration change rather than a code change. The backend runs as a Kubernetes \texttt{Deployment}; increasing the replica count creates additional identical API pods. A Kubernetes \texttt{Service} load-balances traffic across healthy replicas. If one replica fails, Kubernetes removes it from service endpoints and schedules a replacement.
+
+Shared state lives outside the pod; only connection caches remain process-local:
+
+\begin{itemize}
+    \item \textbf{Connection Pools:} Each replica keeps its own cached PostgreSQL \texttt{pgxpool.Pool} instances and MongoDB clients for projects it has served. Pools persist for the lifetime of the pod (PostgreSQL uses \texttt{MinConns=1}, so background eviction rarely removes idle entries; MongoDB has no idle-eviction sweeper). Any replica can serve a request because the DSN is resolved again from Kubernetes Secrets and metadata.
+    \item \textbf{Authentication:} Access tokens are stateless JWTs. Refresh tokens are stored in Redis, so refresh and logout work across all replicas.
+    \item \textbf{Project State:} Project status is persisted in the meta-database. A project created by one replica can be read by another replica.
+    \item \textbf{Provisioned Databases:} Tenant databases are Kubernetes resources. The backend initiates creation, but the operators continue reconciliation independently.
+\end{itemize}
+
+At small and medium scale, horizontal expansion mainly requires increasing:
+
+\begin{itemize}
+    \item backend API replica count;
+    \item Redis capacity or moving Redis to a managed/high-availability deployment;
+    \item meta-database CPU, memory, storage, and connection limits;
+    \item Kubernetes worker-node count;
+    \item operator resources for CloudNativePG and MongoDB reconciliation;
+    \item ingress/proxy replicas for external HTTP and TCP traffic.
+\end{itemize}
+
+The repository ships single-replica defaults, but the API tier, proxy tier, operators, and worker nodes can be scaled independently once manifest replica counts, shared dependencies, and ingress settings are updated. No application code change is required for the first scaling step.
+
+\subsection{Platform Services Scaling}
+
+Platform services consist of the API pods, meta PostgreSQL, Redis, and the database operators. The Kubernetes control plane (API server, etcd, scheduler) sits underneath them. Scaling API replica count alone increases HTTP concurrency, but it also multiplies meta-database connection demand and concurrent provisioning goroutines; it does not remove every bottleneck.
+
+The meta-database becomes a shared dependency for project listing, authentication-related user reads, status updates, and metadata queries. Each API pod already uses a \texttt{pgxpool} with \texttt{MinConns=5} and \texttt{MaxConns=25}; with $N$ replicas, warm baseline demand is $5 \times N$ connections and worst-case demand is $25 \times N$. At higher traffic levels, the meta-database needs proper indexes, read replicas for read-heavy endpoints, controlled write paths for provisioning status updates, and optionally an external pooler such as PgBouncer in front of PostgreSQL. Redis similarly becomes a shared dependency for refresh-token operations and should be deployed with persistence and failover in production.
+
+Every project creation writes Namespaces, Secrets, custom resources, Services, and routing objects into the Kubernetes API. Operators watch custom resources and react to state changes. Thus, creation rate is limited by Go API throughput, Kubernetes API load, etcd performance, and operator capacity.
+
+\subsection{Data Plane Scaling}
+
+The data plane scales differently from the API tier. Each tenant database consumes CPU, memory, storage, file descriptors, network bandwidth, and potentially a PersistentVolume. Increasing backend replicas does not make an individual tenant database faster; it only increases the number of API requests that can be accepted and routed.
+
+Database capacity is controlled through resource tiers. A free-tier PostgreSQL instance requests fewer resources than a premium instance, allowing Kubernetes to bin-pack smaller workloads more densely. Adding worker nodes increases the total schedulable capacity. Storage performance must scale separately through the selected \texttt{StorageClass}; otherwise, many active databases can compete for disk I/O even when CPU and memory are sufficient.
+
+Direct external database access is created only when \texttt{EXTERNAL\_DB\_DOMAIN} is configured. PostgreSQL clients connect through the shared \texttt{pgproxy} catch-all Traefik route (\texttt{HostSNI(`*')}); adding \texttt{pgproxy} replicas increases TCP routing capacity without creating one route object per project. MongoDB clients use per-project Traefik \texttt{IngressRouteTCP} resources matched on project hostnames, so Traefik replica count and route-object growth must be monitored as externally exposed MongoDB projects increase.
+
+\subsection{Multi-Node Kubernetes Topology}
+
+The local \texttt{dbaas-local} cluster is created with a single k3d server node and no agent nodes. Tenant database pods, PostgREST sidecars, and platform services (backend, pgproxy, meta PostgreSQL, Redis) all schedule onto that one node. Moving to a multi-node cluster adds worker nodes that increase schedulable CPU and memory without changing application code.
+
+\subsubsection{Platform Service Placement on Multiple Nodes}
+
+Platform services in the \texttt{default} namespace can be spread or replicated across nodes as follows:
+
+\begin{itemize}
+    \item \textbf{Backend API:} The Deployment (\texttt{deploy/deployment.yaml}) defaults to \texttt{replicas: 1} with \texttt{strategy: Recreate}. For multi-node operation, increase \texttt{spec.replicas} (for example to three) and switch to \texttt{RollingUpdate} so at least one pod serves traffic during upgrades. The ClusterIP \texttt{backend} Service (\texttt{deploy/service.yaml}) selects all healthy pods on ports 8080 and 9090; a Traefik \texttt{Ingress} (\texttt{deploy/ingress.yaml}) routes external HTTP to that Service. Local development uses \texttt{kubectl port-forward} instead. Each pod runs the same binary, reads the same ConfigMap/Secret, and connects to meta PostgreSQL and Redis over cluster DNS (\texttt{postgres.default.svc.cluster.local}, \texttt{redis.default.svc.cluster.local}).
+    \item \textbf{PGProxy:} The proxy Deployment (\texttt{deploy/pgproxy.yaml}) is stateless: each connection performs independent SNI inspection and forwards bytes to the target CNPG service. Multiple \texttt{pgproxy} replicas can run on different nodes; the \texttt{pgproxy} Service and Traefik \texttt{IngressRouteTCP} (\texttt{HostSNI(`*')}) distribute inbound TCP connections across replicas. No session affinity is required because routing is derived from the TLS ClientHello on every new connection.
+    \item \textbf{Meta PostgreSQL and Redis:} Both use \texttt{ReadWriteOnce} PVCs with the \texttt{local-path} storage class and \texttt{Recreate} strategy. Only one pod can mount each volume at a time, so these components remain single-instance and are pinned to whichever node holds the PV. Multi-node production therefore requires either (a) replacing them with managed or clustered services outside the tenant scheduling domain, or (b) migrating to a replicated operator (for example CloudNativePG for meta-DB, Redis Sentinel/Cluster) with network-attached storage.
+\end{itemize}
+
+The meta-database connection pool is configured with \texttt{MinConns=5} and \texttt{MaxConns=25} per API pod in the database bootstrap code. With $N$ API replicas, warm baseline demand is $5 \times N$ connections and worst-case demand is $25 \times N$ unless a shared pooler (PgBouncer) is introduced in front of PostgreSQL.
+
+\subsubsection{Data-Plane Scheduling Across Worker Nodes}
+
+Tenant workloads are scheduled independently of the API tier. When worker nodes are added to the cluster, the Kubernetes scheduler places each CloudNativePG or MongoDB Community pod according to resource \texttt{requests} and \texttt{limits} from the selected tier (Table~\ref{tab:resource_tiers} in Chapter~\ref{chap:system_design}). A free-tier PostgreSQL project requests 0.5 CPU and 512 MiB memory; the scheduler bin-packs many such pods onto available workers until a node reaches allocatable capacity.
+
+Each tenant namespace (\texttt{pg-<uuid>}, \texttt{mongo-<uuid>}) contains:
+
+\begin{itemize}
+    \item a database pod bound to a \texttt{PersistentVolumeClaim} (tenant data);
+    \item for PostgreSQL projects, an optional PostgREST sidecar and, when \texttt{EXTERNAL\_DB\_DOMAIN} is set, an HTTP \texttt{IngressRoute} for PostgREST (direct PostgreSQL TCP uses the shared \texttt{pgproxy} entrypoint, not a per-project TCP route);
+    \item for MongoDB projects, an optional per-project Traefik \texttt{IngressRouteTCP} when external access is enabled;
+    \item Secrets and Services local to that namespace.
+\end{itemize}
+
+Cross-node traffic occurs when an API pod on node~A opens a connection to a CNPG service DNS name that resolves to a pod on node~B. The CNI (Flannel in k3s) encapsulates pod-to-pod traffic; no application-level change is required. PGProxy on node~C forwarding external clients to a database on node~B follows the same cluster DNS and Service routing path.
+
+Measurements in Section~\ref{sec:resource_footprint} report approximately 111 MiB RSS for an idle free-tier PostgreSQL stack (86 MiB CNPG + 25 MiB PostgREST). As a rough extrapolation only---not a multi-node benchmark---a three-worker cluster with 16 GiB RAM per worker and 2 GiB reserved for system overhead could host on the order of $3 \times 120 \approx 360$ idle PostgreSQL stacks before memory dominates, excluding platform pods, operators, MongoDB tenants, and active-query working set.
+
+\subsubsection{Storage Topology and Node Failure}
+
+The demonstration manifests use \texttt{local-path}, which ties each PVC to the node where it was first provisioned. On a single-node demo cluster, volumes live on the same host as the pod. In a multi-node cluster, a pod reschedules to another node only if its \texttt{StorageClass} supports reattach, multi-attach, or rebuild from backup.
+
+If a worker node fails:
+
+\begin{itemize}
+    \item \textbf{Tenant databases:} The CNPG/MongoDB pod remains \texttt{Pending} until the node recovers or the volume is restored from backup onto a new PV. Production multi-node deployments should use a \texttt{StorageClass} with network-attached or replicated block storage and, for premium tiers, operator-configured replication (CloudNativePG supports multi-instance clusters; the current tier mapping provisions single-instance clusters). MongoDB Community Operator supports replica-set topologies across nodes when anti-affinity rules and storage allow it.
+    \item \textbf{Meta PostgreSQL / Redis:} Single-replica \texttt{Recreate} Deployments with \texttt{ReadWriteOnce} volumes represent a single point of failure. Failover requires external HA tooling not present in the thesis deployment.
+\end{itemize}
+
+Kubernetes will reschedule stateless pods (backend, pgproxy) onto healthy nodes automatically. Stateful tenant pods reschedule only when their storage can reattach or be recreated. At high scale, storage becomes a primary limit: total provisioned capacity, snapshot cost, restore time, and per-volume IOPS must be planned alongside CPU and memory.
+
+\subsubsection{Multi-Node Scaling Checklist}
+
+Table~\ref{tab:multinode_scaling} lists values taken directly from the deployment manifests and setup scripts, stating what changes when worker nodes are added. It does not describe a separate production deployment that ships with the thesis codebase.
+
+\begin{table}[H]
+    \centering
+    \small
+    \renewcommand{\arraystretch}{1.25}
+    \begin{tabularx}{\textwidth}{|>{\RaggedRight\arraybackslash}p{2.6cm}|>{\RaggedRight\arraybackslash}X|>{\RaggedRight\arraybackslash}X|}
+    \hline
+    \textbf{Component} & \textbf{As deployed in repo} & \textbf{Effect of adding worker nodes} \\
+    Backend API &
+    \texttt{replicas: 1}, \texttt{strategy: Recreate}; Service 8080/9090; Traefik \texttt{Ingress} in \texttt{deploy/ingress.yaml} &
+    Pods are stateless; increasing replicas requires manifest edits (not present today). Service and Ingress load-balance across nodes once $N>1$. \\
+    \hline
+    PGProxy &
+    \texttt{replicas: 1}; Traefik \texttt{IngressRouteTCP} \texttt{HostSNI(`*')} $\rightarrow$ Service &
+    Process is connection-local and stateless; extra replicas would share TCP load via the existing Service. \\
+    \hline
+    Meta PostgreSQL &
+    \texttt{replicas: 1}, \texttt{Recreate}, \texttt{local-path} 1\,Gi RWO PVC &
+    Volume binds to one node; remains a single-instance dependency until replaced with HA or managed PostgreSQL. \\
+    \hline
+    Redis &
+    \texttt{replicas: 1}, \texttt{Recreate}, AOF on \texttt{local-path} 512\,Mi RWO &
+    Same RWO pinning as meta-PostgreSQL; refresh tokens and schema cache depend on this single pod. \\
+    \hline
+    Tenant databases &
+    CNPG \texttt{instances: 1}; tier CPU/memory/storage from provisioner; no \texttt{storageClassName} set &
+    Scheduler can place pods on any node with free capacity; PVCs use the cluster default StorageClass (\texttt{local-path} on k3d). \\
+    \hline
+    Observability &
+    \texttt{PodMonitor} selects \texttt{app=backend}; \texttt{backend\_instances\_current} refreshed from CRD list scans &
+    Monitor already supports multiple backend pods by label; HPA and cluster autoscaler are \emph{not} defined in the repo. \\
+    \hline
+    \end{tabularx}
+    \caption{Manifest-backed deployment settings and multi-node scheduling constraints}
+    \label{tab:multinode_scaling}
+\end{table}
+
+Additional API replicas multiply meta-database connection demand (baseline $5 \times N$, maximum $25 \times N$ in the current pool configuration) and increase the number of concurrent provisioning goroutines hitting the Kubernetes API. Worker nodes increase schedulable tenant capacity but do not by themselves HA-enable meta-PostgreSQL, Redis, or single-instance CNPG clusters.
+
+\subsubsection{Kubernetes API and Namespace Growth}
+
+The current provisioner creates one Kubernetes namespace per project (\texttt{pg-<uuid>} or \texttt{mongo-<uuid>}). Namespace count therefore grows linearly with provisioned projects. Each namespace holds Secrets, Services, database custom resources, and optional routing objects, so total API object count scales with both project count and the resources created per project.
+
+The Kubernetes API server and etcd must store, list, and serve watches for those objects. CloudNativePG and MongoDB operators maintain watches over their custom resources and reconcile state on every change. As tenant count rises, pressure on the Kubernetes API and etcd comes from aggregate object count, provisioning burst rate, operator reconciliation throughput, and etcd I/O. There is no fixed namespace ceiling in the application; practical limits depend on cluster size, etcd tuning, API-server resources, and operator configuration.
+
+Fleet-wide tenant count can be observed with \texttt{backend\_instances\_current} (refreshed from Kubernetes CRD list scans) or meta-database project totals. The bundled alert \texttt{DBInstancesApproachingLimit} sums \texttt{backend\_pg\_pool\_count} and \texttt{backend\_mongo\_client\_count}, which track cached connection pools and clients inside API pods; it does not measure namespace count.
+
+Adding worker nodes increases schedulable CPU and memory for tenant pods but does not reduce control-plane object count. At very large tenant counts, capacity must be validated through benchmarking on the target cluster rather than assumed from a single numeric threshold.
+
+\subsection{Per-Project Namespace Isolation}
+
+Each provisioned database has a dedicated namespace containing its database custom resource, Secrets, Services, and related resources. This model simplifies deletion because removing the namespace cascades cleanup to all contained objects. It also creates a clear boundary for RBAC, resource accounting, and operational debugging.
+
+The tradeoff is namespace growth. A large number of projects produces a large number of Kubernetes namespaces and increases the number of objects the API server and operators must track. Worker-node count addresses compute and memory pressure from tenant pods; it does not by itself reduce namespace or custom-resource count on the Kubernetes control plane.
+
+\subsection{Connection Pool Scaling}
+
+Connection pools reduce latency for active projects, but they also multiply with backend replicas and across nodes. If one project is active and requests hit five API replicas (potentially on five different nodes), each replica maintains its own cached \texttt{pgxpool.Pool}. With a maximum of five PostgreSQL connections per pool, the same tenant may consume up to 25 connections across the API tier even though all pools resolve the same CNPG service endpoint.
+
+This behavior is acceptable at moderate scale because each pool has conservative per-pool limits (\texttt{MaxConns=5}) and pools are evicted only when all connections drop to zero (uncommon while \texttt{MinConns=1}) or when the DSN changes; MongoDB clients remain cached until explicit eviction or ping failure. At high scale, the platform should add stronger controls:
+
+\begin{itemize}
+    \item route a project's requests consistently to a smaller set of backend replicas where possible;
+    \item reduce per-pool maximum connections for low tiers;
+    \item use an external pooler such as PgBouncer for PostgreSQL-heavy workloads;
+    \item enforce per-user and per-project concurrency limits;
+    \item monitor total database connections per tenant and per backend replica.
+\end{itemize}
+
+\subsection{High-Scale Scenario}
+
+One million registered users does not automatically mean one million active databases. The practical load depends on how many users are active at the same time, how many projects each user owns, and what percentage of projects are running. The architecture can handle growth in stages, but a one-million-user deployment exposes several predictable pressure points.
+
+\subsubsection{If Most Users Are Inactive}
+If most users are registered but inactive, the main load is on the meta-database user and project tables. The platform needs indexes, pagination, efficient filtering, and database maintenance, but it does not need one million running database pods. The API tier can scale horizontally by replica count, and Redis can handle refresh tokens if deployed with sufficient memory and eviction policy discipline.
+
+\subsubsection{If Many Users Are Concurrently Active}
+If tens of thousands of users are active concurrently, API replicas, Redis, the meta-database, and ingress capacity must all scale. Query endpoints also increase load on tenant databases. The platform must introduce admission control so one user or project cannot consume all API workers, connection pools, or operator capacity. Rate limiting, per-tier concurrency limits, and queueing for provisioning become necessary at this level.
+
+\subsubsection{If Many Users Create Databases}
+The hardest case is not one million accounts; it is a high number of running tenant databases. If one million users each create a running database, a single Kubernetes cluster is not a realistic target. The system would face:
+
+\begin{itemize}
+    \item too many Kubernetes namespaces and custom resources for comfortable single-cluster operation;
+    \item excessive operator watch-cache memory and reconciliation load;
+    \item a very large number of Pods, Services, Secrets, and PersistentVolumeClaims;
+    \item storage provisioning pressure and high aggregate disk I/O demand;
+    \item large Prometheus cardinality if every instance exports detailed metrics;
+    \item high TCP connection pressure on proxies, backend pods, and tenant databases.
+\end{itemize}
+
+At that scale, the architecture must evolve from one cluster to a fleet of clusters. A global metadata and routing layer would keep user and project records, while a placement service would assign each project to a region and cluster. The project record would store or derive its placement. Backend API replicas would route operations to the correct cluster-specific provisioner and connection endpoint.
+
+\subsection{Required Evolution for Very High Scale}
+
+For a one-million-user production environment, the current architecture remains a strong foundation but needs additional layers:
+
+\begin{itemize}
+    \item \textbf{Multi-Cluster Placement:} Distribute projects across many Kubernetes clusters instead of placing all tenant databases in one cluster.
+    \item \textbf{Provisioning Queue:} Replace direct goroutine provisioning with a durable queue and worker pool so database creation can be rate-limited, retried, and observed.
+    \item \textbf{Autoscaling:} Use Horizontal Pod Autoscalers for API, proxy, and worker components; use cluster autoscaling for worker nodes.
+    \item \textbf{Metadata Scaling:} Use managed PostgreSQL, read replicas, connection pooling, partitioning where necessary, and strict query indexing.
+    \item \textbf{Metrics Cardinality Control:} Aggregate per-tier and per-cluster metrics, and avoid unbounded labels such as full project IDs in high-cardinality Prometheus series.
+    \item \textbf{Tenant Lifecycle Policies:} Suspend idle free-tier databases, enforce quotas, and require explicit activation before consuming compute.
+    \item \textbf{Regional Routing:} Route users to the nearest region and keep database traffic inside that region where possible.
+\end{itemize}
+

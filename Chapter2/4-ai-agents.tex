@@ -158,7 +158,7 @@ AutoGen's runtime is organized around a small set of first-class abstractions th
   \item \textbf{Message Schemas and Validators.} AutoGen encourages schema-driven exchanges. Agents are expected to emit outputs conforming to developer-declared JSON/Protobuf schemas; the CM validates outputs and applies fallback corrective strategies if validation fails (clarification request, heuristic repair, verifier invocation). \cite{autogen_arXiv}
 \end{itemize}
 
-These abstractions convert conversational programming tasks into a disciplined prompt-construction and execution pipeline: when it is an agent's turn, the CM computes a prompt \(P\) by composing the agent's role prompt \(R_i\), the retrieved memory \(M_{\mathrm{ret}}\), and recent dialogue \(H_{\mathrm{recent}}\); then the LLM is invoked to produce a token sequence that is post-processed into actions or tool calls.
+These abstractions convert conversational programming tasks into a disciplined construction of prompts and execution pipeline: when it is an agent's turn, the CM computes a prompt \(P\) by composing the agent's role prompt \(R_i\), the retrieved memory \(M_{\mathrm{ret}}\), and recent dialogue \(H_{\mathrm{recent}}\); then the LLM is invoked to produce a token sequence that is post-processed into actions or tool calls.
 
 
 
