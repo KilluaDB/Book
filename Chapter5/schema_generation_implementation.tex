@@ -1,0 +1,75 @@
+\section{AI-Assisted Schema Generation Implementation}
+\label{sec:schema_gen_impl}
+
+This section describes how the schema generation design from Chapter~\ref{chap:system_design} is implemented as a running service. The service is a standalone Python microservice, separate from the Go backend, that the backend reaches over HTTP. Building it outside the Go process keeps the machine-learning dependency footprint (model clients, embedding models, the agent framework) away from the control plane and lets the two parts scale and ship independently.
+
+\subsection{Technology Stack}
+
+The service is built on FastAPI and served by Uvicorn. The multi-agent workflow is implemented with Microsoft AutoGen, specifically the \texttt{autogen\_agentchat}, \texttt{autogen\_core}, and \texttt{autogen\_ext} packages, which supply the agent abstractions, conversation contexts, and model-client adapters. Retrieval uses the \texttt{sentence\_transformers} library for embeddings and NumPy for similarity search. PostgreSQL access for the physical design step uses a direct driver connection rather than an ORM, matching the explicit style used elsewhere in the platform.
+
+\subsection{Model Provider Abstraction}
+
+The workflow is model-agnostic by construction. A small factory builds the right client from a single model name, so the same agent code runs against any supported provider. The registered providers are OpenAI (\texttt{gpt-4o} and a \texttt{gpt-4.5} preview), Anthropic Claude (a Sonnet 4 model), Google Gemini (2.5 Pro and Flash), and DeepSeek V3 served through the Hugging Face router. DeepSeek is the default because it gives a strong cost-to-quality ratio for this task. Each client is created with function calling and JSON output enabled, which the agents rely on for tool use and structured answers. The caller selects a model per request; an unknown model name is rejected before any work starts.
+
+\subsection{Agent Team Construction}
+
+The agents are assembled into a selector-driven group chat. A custom selection function encodes the normal path through the workflow (manager, then conceptual, then logical, then QA, then execution, then back to the manager for acceptance) and the failure routes that send rejected work back to the right designer. When the rules do not determine a clear next speaker, control falls back to a language-model selector guided by a prompt that describes the workflow.
+
+The conceptual designer and reviewer are wrapped together in a nested team that runs as a round-robin until the reviewer writes its approval signal. That nested team is exposed to the outer workflow as a single agent, so the rest of the pipeline consumes one agreed conceptual model and never sees the internal review turns. Termination is bounded on both levels: the outer workflow stops on an explicit completion signal from the manager or after a capped number of messages, and the inner review loop stops on approval or the same message cap.
+
+Two details of the construction are worth noting. The QA agent is given a restricted conversation context that exposes only the manager's requirement analysis, which keeps it from simply reading the schema it is meant to test independently. And the physical designer is intentionally left out of the group: it is run on its own against the finished logical output, because it follows the design rather than debating it.
+
+\subsection{Deterministic Tools for Keys and Normalization}
+
+The most error-prone parts of logical design are not left to free generation. The logical designer is given two deterministic tools backed by a shared normalization module. The first computes candidate keys from declared functional dependencies using attribute-closure search under Armstrong's axioms; the second decomposes relations into third normal form by detecting partial and transitive dependencies and splitting tables accordingly. The model's job is to state the functional dependencies it reads from the requirement and call these tools; the algorithms then return keys and decompositions that are correct by construction. The theory behind these algorithms was covered in Chapter~\ref{chap:related_work} and is not repeated here. Moving this work into code is what lets the service make a normalization claim it can actually stand behind, instead of hoping the model normalized correctly.
+
+\subsection{Physical Design and Self-Refinement}
+
+After the logical schema is agreed, the physical designer runs as a separate step with a set of PostgreSQL tools: connection testing, DDL syntax validation, DDL execution, and direct SQL execution. It infers concrete column types from attribute names using a documented set of rules (identifiers become serial or UUID keys, monetary fields become fixed-precision decimals, timestamps become time-zone-aware columns, and so on) and proposes indexes prioritized by how they will be queried, starting with foreign keys.
+
+Because generated DDL can still fail against a real database, the step includes a self-refinement loop. If execution reports an error, the failing output is fed back to the agent with instructions to diagnose, fix, and re-run, for up to three attempts. This turns a one-shot generator into a small repair loop and removes a class of failures (small syntax or ordering mistakes) that would otherwise reach the user.
+
+\subsection{Entity-Relationship Diagram Generation}
+
+The entity-relationship diagram is produced by parsing the conceptual model directly into Mermaid diagram syntax, not by asking a model to draw it. Deterministic parsing is faster, reproducible, and free of the hallucinations that creep in when a model is asked to render structured data as a diagram. The result is checked by a syntax validator before it is returned, and a model-based generator is kept only as a fallback for the rare case where parsing cannot recover a usable structure.
+
+\subsection{HTTP and Streaming Interface}
+
+The service exposes a small HTTP surface: a blocking generation endpoint, a streaming generation endpoint, a Mermaid validation endpoint, PostgreSQL connection and execution endpoints used in the containerized setup, and a health check. A mock streaming endpoint replays scripted events so the frontend integration can be exercised without any model credentials.
+
+The streaming endpoint is the one the backend proxies to the frontend. It emits Server-Sent Events, one JSON object per event, across three ordered phases: logical design, physical design, and report. Event types distinguish phase markers, agent messages, tool calls and their results, optional model reasoning, the finished Mermaid diagram, errors, and a final completion sentinel. This is the upstream feed that the Go backend forwards verbatim as described earlier in this chapter, so the user watches the agents work in real time instead of waiting for a single late response.
+
+\subsection{Retrieval-Augmented Generation Implementation}
+
+The retrieval subsystem is built around an abstract retriever that each domain extends with its own knowledge. Knowledge is expressed as typed chunks; every chunk carries its domain, the resource it describes, a content type (definition, relationship, constraint, mapping, normalization, or pattern), free-form tags, a trust level, and flags marking protected health or personally identifiable information. This metadata lets a retrieval be filtered, not just ranked.
+
+Embeddings come from the \texttt{all-MiniLM-L6-v2} sentence-transformer, which produces 384-dimensional vectors. Search is a cosine similarity computed as a dot product over normalized vectors held in memory, keeping only results above a relevance threshold and returning the top few. The whole corpus is small enough that an in-memory NumPy index is faster and simpler than a dedicated vector database, and embeddings are cached to disk so they are not recomputed on every start. If the embedding library is unavailable, the retriever degrades gracefully to a word-frequency representation so the service still runs.
+
+Domain detection is intentionally lightweight: the requirement text is scored against per-domain keyword lists, and the highest-scoring domain wins, defaulting to general design when nothing matches. The retriever is exposed to the agents as a set of seven asynchronous tools, distributed by stage so each agent only sees what is useful to it, as shown in Table~\ref{tab:rag_tool_dist}.
+
+\begin{table}[H]
+    \centering
+    \small
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabularx}{\textwidth}{|>{\RaggedRight\arraybackslash}p{3.8cm}|>{\RaggedRight\arraybackslash}X|}
+    \hline
+    \textbf{Agent} & \textbf{Retrieval tools available} \\
+    \hline
+    Conceptual Designer / Reviewer & Domain detection, entity guidance, relationship guidance, general domain query. \\
+    \hline
+    Logical Designer & Cardinality rules, normalization rules, general domain query. \\
+    \hline
+    Physical Designer & Data-type mapping, general domain query. \\
+    \hline
+    \end{tabularx}
+    \caption{Distribution of retrieval tools across the design stages.}
+    \label{tab:rag_tool_dist}
+\end{table}
+
+The architecture is built to grow. Adding a domain means adding a knowledge module that extends the base retriever, registering it in the domain factory, and adding its detection keywords; nothing in the agent code changes. The six domains listed in Chapter~\ref{chap:system_design} were authored against this pattern, and the same pattern leaves room for more.
+
+\subsection{Containerization and Deployment}
+
+The service ships as a Docker image published to Docker Hub and deployed into the same Kubernetes cluster as the rest of the platform, in the default namespace. It runs as a single-replica Deployment with the \texttt{Recreate} strategy, consistent with the other platform components. Resource requests are modest (a quarter CPU and 512 MiB of memory) with limits of one CPU and 2 GiB, the memory headroom reflecting the embedding model and agent runtime.
+
+Liveness and readiness probes hit the health endpoint, but with generous initial delays because the process must load the embedding model and warm the agent framework before it can serve traffic. Configuration is supplied through a ConfigMap for the PostgreSQL connection used by the physical design tools and a Secret for the model provider API keys, so no credentials are baked into the image. The Go backend reaches this Deployment through the schema service base URL described earlier, which keeps the AI dependency entirely behind the control plane.

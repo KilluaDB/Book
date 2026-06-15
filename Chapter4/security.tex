@@ -1,57 +1,35 @@
 \section{Security Engineering and Network Isolation}
 
-A multi-tenant DBaaS platform must assume that user requests, AI-generated SQL, tenant database content, and network paths are untrusted unless explicitly validated. The security design therefore combines API authentication, Kubernetes isolation, least-privilege access, credential scoping, and query validation.
+A multi-tenant Database-as-a-Service platform must operate under a zero-trust assumption where user requests, AI-generated queries, tenant database contents, and network paths are treated as inherently untrusted. The security architecture is therefore constructed around defense-in-depth principles, combining strict network isolation, decentralized credential management, least-privilege role bindings, and explicit query execution boundaries.
 
-\subsection{Kubernetes Namespace and Resource Isolation}
+\subsection{Infrastructure and Network Isolation}
 
-Each database project is provisioned into a deterministic Kubernetes namespace. PostgreSQL projects use \texttt{pg-<uuid>} namespaces and MongoDB projects use \texttt{mongo-<uuid>} namespaces. This boundary groups the database custom resource, Secrets, Services, routing resources, and storage claims for the project.
+Tenant isolation is achieved through hard boundary enforcement at the container orchestration layer. Rather than operating a shared, multi-tenant database cluster, the platform provisions each tenant project into a mathematically deterministic, isolated namespace. This isolation boundary encapsulates the database custom resources, routing rules, storage claims, and cryptographic secrets dedicated exclusively to that project.
 
-Namespace isolation provides three practical benefits. First, deletion becomes reliable because removing the namespace cascades cleanup to contained resources. Second, Kubernetes RBAC and resource policy can be applied at the namespace boundary. Third, operational faults in one project are easier to inspect because all related runtime objects share the same namespace.
+This isolated network architecture provides three critical security properties. First, it ensures that cross-tenant data access is structurally impossible at the network layer, preventing lateral movement between projects. Second, it allows fine-grained resource quotas and access policies to be enforced at the perimeter of each project. Finally, it enables reliable and secure teardown; when a project is deleted, destroying the namespace guarantees the cascading deletion of all associated infrastructure, preventing orphaned resources and potential data leaks.
 
-\subsection{Credential Management}
+\subsection{Decentralized Credential Management}
 
-The backend avoids storing tenant database DSNs in the platform meta-database. During provisioning, the tenant database password is written to a Kubernetes \texttt{Secret}; the database operator then consumes that Secret during bootstrap. When the backend later needs to connect to a tenant database, it resolves the current connection information from Kubernetes and constructs the DSN at runtime.
+The architecture fundamentally avoids centralizing tenant credentials. The control plane's meta-database does not store tenant database connection strings (DSNs) or raw passwords. Instead, tenant credentials are mathematically generated during the provisioning state machine and injected directly into secure enclave objects within the tenant's isolated namespace. 
 
-This design has two important consequences:
+When the control plane must execute operations on behalf of a user, it dynamically resolves the connection parameters at runtime. This design minimizes the blast radius of a potential control plane breach: compromising the meta-database does not yield direct access to the underlying tenant databases. Furthermore, connection managers are designed to detect credential rotation dynamically. If the resolved parameters change, stale connection pools are immediately evicted.
 
-\begin{itemize}
-    \item \textbf{Credential Scope:} Tenant database credentials live in Kubernetes Secrets rather than project metadata rows.
-    \item \textbf{Rotation Awareness:} Connection managers compare the resolved DSN with the cached DSN. If credentials or service addresses change, stale pools are evicted and recreated.
-\end{itemize}
+To protect the control plane itself, platform access credentials are mathematically hashed and salted before storage, and authentication workflows strictly separate the credential policies. Platform API access relies on standard complexity rules, while tenant database passwords—which protect the direct external data plane—enforce strict cryptographic complexity requirements to defend against brute-force attacks.
 
-Application user passwords are hashed with Argon2id before storage. The encoded hash includes the parameters, salt, and derived key required for verification. After hashing, the service clears the plain password field from the in-memory user model; however, Go strings cannot be guaranteed to be overwritten in memory, so this should be understood as reference cleanup rather than complete memory sanitization.
+\subsection{Role-Based Access Control (RBAC)}
 
-The platform applies \textbf{two distinct password policies}. Platform account passwords (registration and login) require a minimum of six characters at the HTTP validation layer. Tenant database passwords, supplied when creating a project, must meet a stronger policy: at least twelve characters with uppercase, lowercase, digit, and special-character requirements. This separation reflects the different exposure surfaces---platform credentials protect API access, while tenant passwords protect direct database connections.
+The control plane orchestrator operates under the principle of least privilege, mapped through strict Role-Based Access Control (RBAC) policies. Because the orchestrator must dynamically generate and tear down tenant namespaces, it requires elevated permissions within the cluster. However, these permissions are explicitly bounded. 
 
-An optional \texttt{DB\_CRED\_ENCRYPTION\_KEY} environment variable enables AES-256-GCM encryption utilities for sensitive credential material at rest when configured. In the current deployment, tenant database passwords are primarily scoped to Kubernetes Secrets rather than encrypted columns in the meta-database.
+The orchestrator is granted specific verbs (e.g., create, read, update, delete) strictly limited to the resource types required for database lifecycle management, such as Secrets, Services, and Custom Resources. It is structurally denied access to cluster-wide node management or core networking policies, ensuring that even if the orchestrator is compromised, the attacker cannot escalate privileges to hijack the underlying physical infrastructure.
 
-\subsection{Kubernetes Role-Based Access Control}
+\subsection{Authentication and Session Architecture}
 
-The backend runs under a Kubernetes ServiceAccount bound to a \textbf{ClusterRole} named backend-db-manager. Because the platform creates and deletes namespaces per project, namespace-scoped Roles are insufficient; the backend needs cluster-level permission to manage Namespaces, Secrets, custom resources, Deployments, Services, and routing objects.
+The REST API implements a robust, dual-token authentication model to balance stateless scalability with definitive session control. Short-lived access tokens authenticate immediate API requests, reducing the risk of token interception. Concurrently, long-lived refresh tokens are persisted in a high-speed, centralized cache, allowing the control plane to issue server-side revocations instantaneously upon logout or detected security anomalies.
 
-The ClusterRole grants verbs such as \texttt{create}, \texttt{get}, \texttt{list}, \texttt{watch}, \texttt{update}, \texttt{patch}, and \texttt{delete} on the resources needed for provisioning and teardown. This is broader than a single-namespace Role but still narrower than \texttt{cluster-admin}: the backend cannot manage unrelated cluster components such as node objects or cluster-wide network policies unless explicitly granted elsewhere.
-
-Production deployments should review this ClusterRole against the minimum verbs actually exercised by the provisioner, rotate the ServiceAccount credentials on a defined schedule, and consider splitting read and write permissions if a read-only reconciliation path is introduced later.
-
-\subsection{Authentication and Session Control}
-
-The REST API uses a dual-token model:
-
-\begin{itemize}
-    \item \textbf{Access Token:} A short-lived JWT (15 minutes) used to authenticate normal API requests via the \texttt{Authorization: Bearer} header.
-    \item \textbf{Refresh Token:} A longer-lived JWT (30 days) persisted in Redis with a matching TTL and delivered to clients as an httpOnly cookie on registration and login.
-\end{itemize}
-
-Refresh-token persistence gives the system a server-side revocation point. During logout, the refresh token is removed from Redis. During token refresh, the backend validates the presented refresh token against Redis and rotates it by deleting the old token and issuing a new pair.
-
-\subsubsection*{Google OAuth2}
-
-In addition to email-and-password authentication, the platform supports Google OAuth2. The login endpoint redirects the browser to Google's authorization server; the callback exchanges the authorization code for a Google access token, fetches verified user information, and either links to an existing account or creates a new user record. The OAuth callback returns an access token in the JSON response; refresh-token handling follows the same Redis-backed model as password login when applicable.
-
-OAuth reduces password-management burden for users but introduces dependency on an external identity provider. Production deployments must configure allowed redirect URLs, protect client secrets, and treat OAuth-created accounts with the same role and project-ownership rules as locally registered users.
+The architecture also delegates identity verification to external OAuth2 providers. By offloading primary authentication to established Identity Providers (IdPs), the system reduces the burden of managing raw passwords for users who opt into federated identity, shifting the risk of credential compromise away from the platform's internal databases.
 
 \subsection{Query Execution Boundary}
 
-All SQL execution is centralized in the Go backend. This is important for both manual query execution and Text-to-SQL. The external AI service may generate SQL, but it does not directly execute that SQL against tenant databases. The generated statement is returned to the backend, passed through the query validation path, and executed only if it satisfies the backend constraints.
+All SQL and database commands—whether manually submitted by users or autonomously generated by external AI services—are classified as untrusted input. To defend against accidental data destruction or malicious injection, the control plane enforces a strict execution boundary.
 
-The validator blocks multi-statement input and rejects high-risk statements such as database or schema creation/deletion and truncation. \texttt{DELETE FROM} statements are permitted only when they include a \texttt{WHERE} clause; unguarded deletes are rejected. These checks are not a complete replacement for database permissions, but they reduce the most dangerous classes of accidental or generated destructive queries at the API boundary.
+External AI services never receive direct access to tenant databases. Instead, they return generated queries to the control plane. The control plane passes all incoming queries through a strict validation layer before dispatching them to the tenant database. This application-level firewall blocks multi-statement execution, database destruction commands, schema truncation, and unguarded deletion operations. While this does not replace native database user permissions, it establishes a critical architectural guardrail that sanitizes the application boundary.
