@@ -83,10 +83,10 @@
 % -----------------------------
 \fancypagestyle{firstpage}{
   \fancyhf{}
-  \fancyhead[LO]{\small Volume X, Issue X, 2026}
- \fancyhead[RO]{\small LGU J. Comput. Sci. \& IT}
-  \fancyfoot[L]{\footnotesize Received: DD Month YYYY; Revised: DD Month YYYY; Accepted: DD Month YYYY\\\textsuperscript{*}Corresponding Author: Hassan Hussein Azmy \textless hassanhusseinazmy@gmail.com\textgreater}
-  \fancyfoot[R]{\footnotesize \textcopyright\ 2026 by the Author(s). Published by LGURJCSIT,\\ \hspace{0.5cm} under the CC-BY license}
+%   \fancyhead[LO]{\small Volume X, Issue X, 2026}
+%  \fancyhead[RO]{\small LGU J. Comput. Sci. \& IT}
+%   \fancyfoot[L]{\footnotesize Received: DD Month YYYY; Revised: DD Month YYYY; Accepted: DD Month YYYY\\\textsuperscript{*}Corresponding Author: Hassan Hussein Azmy \textless hassanhusseinazmy@gmail.com\textgreater}
+%   \fancyfoot[R]{\footnotesize \textcopyright\ 2026 by the Author(s). Published by LGURJCSIT,\\ \hspace{0.5cm} under the CC-BY license}
   \renewcommand{\headrulewidth}{0.4pt}
   \renewcommand{\footrulewidth}{0.4pt}
 }
@@ -100,6 +100,8 @@
     \fontsize{12}{14}\selectfont
     Hassan Hussein Azmy\textsuperscript{1*}, Abdullah Hany Ragab\textsuperscript{1}, Ali Mohamed Ali\textsuperscript{1},\\[0.5ex]
     Ahmed Bahy Youssef\textsuperscript{1}, Aya Mohammed Sayed\textsuperscript{1}\\[1ex]
+    \fontsize{11}{13}\selectfont
+    \textit{Supervised by:} Dr. Rania Ramadan Abdel-Dayem\textsuperscript{1}, Eng. Mustafa Shokry\textsuperscript{1}\\[1ex]
     \fontsize{12}{14}\selectfont
     \textsuperscript{1}Department of Computer Systems Engineering, Benha University, Benha, Egypt
 }
@@ -124,9 +126,9 @@
 \vspace{-0.7cm}
 \noindent
 \raggedright
-{\fontsize{11}{13}\selectfont Original Article}
+% {\fontsize{11}{13}\selectfont Original Article}
 \hfill
-{\fontsize{11}{13}\selectfont\footnotesize https://doi.org/xx.xxxx/xxxx}
+% {\fontsize{11}{13}\selectfont\footnotesize https://doi.org/xx.xxxx/xxxx}
 
 \vspace{-0.5cm}
 
@@ -344,20 +346,12 @@ The Text-to-SQL service translates natural language questions into executable SQ
 
 Each agent uses carefully engineered prompts combining system instructions, structured schema context, and few-shot examples. The Selector and Reviewer use deterministic decoding (temperature~=~0), while the Decomposer allows modest stochasticity for creative reasoning.
 
-% ------------------------------------------------------------------
-% FIGURE PLACEHOLDER: Text-to-SQL Pipeline
-% ------------------------------------------------------------------
-\begin{figure*}[t]
-\centering
-\fbox{\begin{minipage}{0.70\textwidth}
-\centering
-\vspace{0.2cm}
-\includegraphics[width=0.95\textwidth]{text2SQL2.jpg}
-\vspace{0.2cm}
-\end{minipage}}
-\caption{Text-to-SQL multi-agent pipeline: Selector, Decomposer, Reviewer, and Refiner stages.}
-\label{fig:text2sql_pipeline}
-\end{figure*}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{text2SQL2.jpg}
+    \caption{Multi-Agent Pipeline}
+    \label{fig:Multi-Agent Pipeline}
+\end{figure}
 
 \section{Evaluation}
 \fontsize{11}{13}\selectfont
@@ -483,15 +477,6 @@ Future work includes: (1)~unified workflow automation connecting schema generati
 \vspace{0.5cm}
 
 \small
-\textbf{Conflict of Interest:} The authors declare no conflict of interest.
-
-\textbf{Author Contributions:} H.H. Azmy designed and implemented the backend system, provisioning engine, and PGProxy. A.H. Ragab implemented the Text-to-SQL service. A.M. Ali developed the AI-assisted schema generation service. A.B. Youssef contributed to deployment and infrastructure. A.M. Sayed developed the frontend interface. All authors contributed to testing and manuscript preparation.
-
-\textbf{Funding:} This research received no external funding.
-
-\textbf{Ethical Statement:} This study follows ethical and academic integrity guidelines.
-
-\textbf{Supervisor:} Dr. Rania Ramadan Abdel-Dayem and Eng. Mustafa Shokry, Department of Computer Systems Engineering, Faculty of Engineering, Benha University.
 
 \balance
 \fontsize{11}{13}\selectfont
