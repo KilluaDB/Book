@@ -3,7 +3,14 @@
 
 The previous section described schema generation from the backend's point of view: the Go API forwards a natural-language request to an external service, caches the returned DDL under a project-scoped key, and applies it only after the user approves. This section looks inside that external service and explains how it is designed. The theoretical grounding for the techniques used here (multi-agent LLM systems, tool use, and retrieval-augmented generation) was already covered in Section~\ref{ch2:sec4}, so the focus below is on the concrete design decisions rather than the underlying theory.
 
-The service takes a plain-language description of an application and produces a relational design for it: an entity-relationship view, a normalized set of tables in third normal form, executable PostgreSQL DDL, and a human-readable report. The hard part is not generating SQL text; a single prompt can do that. The hard part is producing a design that is internally consistent, correctly keyed, normalized, and faithful to the requirement. The design therefore treats schema generation as a small engineering workflow rather than a single model call.
+The service takes a plain-language description of an application and produces a relational design for it: an entity-relationship view, a normalized set of tables in third normal form, executable PostgreSQL DDL, and a human-readable report. The hard part is not generating SQL text; a single prompt can do that. The hard part is producing a design that is internally consistent, correctly keyed, normalized, and faithful to the requirement. The design therefore treats schema generation as a small engineering workflow rather than a single model call. Figure~\ref{fig:schema_arch} gives the overall architecture, and the subsections that follow explain each part.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/ai/schema_architecture.pdf}
+    \caption{Multi-agent schema generation architecture.}
+    \label{fig:schema_arch}
+\end{figure}
 
 \subsection{Design Goals}
 
@@ -19,7 +26,7 @@ The service was shaped by five goals that often pull against each other:
 
 \subsection{Decomposition into Specialized Agents}
 
-Rather than ask one model to do everything, the service splits the work across agents that each own one stage of the classical database design lifecycle. This mirrors how a human team would approach the same task and, more importantly, it lets each stage be checked before the next one builds on it. Table~\ref{tab:schema_agents} lists the roles.
+Rather than ask one model to do everything, the service splits the work across agents that each own one stage of the classical database design lifecycle. This mirrors how a human team would approach the same task and, more importantly, it lets each stage be checked before the next one builds on it. Table~\ref{tab:schema_agents} lists the roles, and Figure~\ref{fig:schema_arch} shows how they are wired together.
 
 \begin{table}[H]
     \centering

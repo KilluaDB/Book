@@ -73,3 +73,29 @@ The architecture is built to grow. Adding a domain means adding a knowledge modu
 The service ships as a Docker image published to Docker Hub and deployed into the same Kubernetes cluster as the rest of the platform, in the default namespace. It runs as a single-replica Deployment with the \texttt{Recreate} strategy, consistent with the other platform components. Resource requests are modest (a quarter CPU and 512 MiB of memory) with limits of one CPU and 2 GiB, the memory headroom reflecting the embedding model and agent runtime.
 
 Liveness and readiness probes hit the health endpoint, but with generous initial delays because the process must load the embedding model and warm the agent framework before it can serve traffic. Configuration is supplied through a ConfigMap for the PostgreSQL connection used by the physical design tools and a Secret for the model provider API keys, so no credentials are baked into the image. The Go backend reaches this Deployment through the schema service base URL described earlier, which keeps the AI dependency entirely behind the control plane.
+
+\subsection{Evaluation Results}
+
+The methodology for scoring generated schemas was described in Chapter~\ref{chap:related_work}, so this section reports the outcome and one refinement made to the scoring rather than repeating how it works. Generated relations are compared against reference schemas on four dimensions: schema (table) identification, attribute completeness, primary keys, and foreign keys, each measured with an F1 score and an exact-correctness accuracy.
+
+Names are aligned in layers: exact and synonym matching first, then embedding similarity, then approximate string matching based on n-gram overlap. The refinement applies that same string matching to primary and foreign keys, which earlier had to be identical to count as correct. A key is now credited when its attributes align under the string-level comparison, so a key that is correct but named differently from the reference is no longer marked wrong. Table~\ref{tab:schema_eval} shows the effect of this change.
+
+\begin{table}[H]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|l|c|c|c|c|c|c|c|c|}
+    \hline
+     & \multicolumn{2}{c|}{\textbf{Schema}} & \multicolumn{2}{c|}{\textbf{Attribute}} & \multicolumn{2}{c|}{\textbf{Primary key}} & \multicolumn{2}{c|}{\textbf{Foreign key}} \\
+    \cline{2-9}
+    \textbf{Method} & F1 & Acc. & F1 & Acc. & F1 & Acc. & F1 & Acc. \\
+    \hline
+    Before & 82.37 & 55.55 & 72.73 & 38.52 & \textendash & 59.73 & \textendash & 79.88 \\
+    \hline
+    After & 87.42 & 59.63 & 77.29 & 45.87 & 77.96 & 65.19 & 89.91 & 81.73 \\
+    \hline
+    \end{tabular}
+    \caption{Schema generation quality before and after extending primary- and foreign-key matching with approximate string matching. All values are percentages.}
+    \label{tab:schema_eval}
+\end{table}
+
+Across every dimension the scores rise, and the key columns gain an F1 value that exact-only matching could not produce. The clearest gains are on the keys themselves, which is what the refinement targets, while the steady improvement in schema and attribute scores reflects the same matching being applied consistently throughout.

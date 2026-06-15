@@ -12,6 +12,7 @@
 *.cb2
 .*.lb
 *.pdf
+!schema_architecture.pdf
 
 ## Intermediate documents
 *.dvi

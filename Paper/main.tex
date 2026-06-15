@@ -217,7 +217,7 @@ Text-to-SQL aims to translate natural language questions into executable SQL que
 
 \subsection{AI-Assisted Schema Design}
 
-Traditional database design follows a well-established lifecycle: requirements analysis, conceptual design (ER modeling)~\cite{chen1976}, logical design (normalization to 3NF)~\cite{bernstein1976}, and physical design. Recent work has explored using LLMs to automate parts of this pipeline, but most approaches treat schema generation as a single-pass text generation problem, producing outputs that may violate normalization rules or contain inconsistent keys. Our work addresses this by combining LLM reasoning with deterministic normalization algorithms within a multi-agent feedback loop.
+Traditional database design follows a well-established lifecycle: requirements analysis, conceptual design (ER modeling)~\cite{chen1976}, logical design (normalization to 3NF)~\cite{bernstein1976}, and physical design. Recent work has explored using LLMs to automate parts of this pipeline, including multi-agent frameworks for relational schema generation~\cite{schemaagent2025}. However, many approaches still treat schema generation as a single-pass text generation problem, producing outputs that may violate normalization rules or contain inconsistent keys. Our work addresses this by combining LLM reasoning with deterministic normalization algorithms within a multi-agent feedback loop.
 
 
 \section{System Architecture}
@@ -270,7 +270,7 @@ The schema generation service takes a natural language description of an applica
 
 \subsection{Multi-Agent Workflow}
 
-Rather than relying on a single LLM call, the service decomposes schema generation into specialized agents that mirror the classical database design lifecycle. Table~\ref{tab:schema_agents} lists the agent roles.
+Rather than relying on a single LLM call, the service decomposes schema generation into specialized agents that mirror the classical database design lifecycle, organized into the three-phase architecture shown in Figure~\ref{fig:schema_pipeline}. Table~\ref{tab:schema_agents} lists the agent roles.
 
 % ------------------------------------------------------------------
 % TABLE 2: Schema Generation Agents
@@ -312,22 +312,14 @@ The most error-prone parts of logical design---key discovery and normalization--
 The service includes a curated knowledge base covering six application domains (healthcare, e-commerce, finance, education, logistics, and human resources). When a requirement arrives, the service infers its domain and makes relevant entity patterns, relationship conventions, and type mappings available to the agents via retrieval-augmented tools. Embeddings use the \texttt{all-MiniLM-L6-v2} sentence transformer with cosine similarity search.
 
 % ------------------------------------------------------------------
-% FIGURE PLACEHOLDER: Schema Generation Architecture
+% FIGURE: Schema Generation Architecture
 % ------------------------------------------------------------------
-% \begin{figure}[htbp]
-% \centering
-% \fbox{\begin{minipage}{0.92\columnwidth}
-% \centering
-% \vspace{2.5cm}
-% \textbf{\large [TEXT-TO-SCHEMA ARCHITECTURE IMAGE]}
-
-% \smallskip
-% \small Replace this placeholder with the multi-agent schema generation architecture diagram.
-% \vspace{2.5cm}
-% \end{minipage}}
-% \caption{Multi-agent schema generation pipeline showing the inner conceptual review loop and outer validation loop.}
-% \label{fig:schema_pipeline}
-% \end{figure}
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.92\textwidth]{schema_architecture.pdf}
+\caption{Multi-agent schema generation architecture.}
+\label{fig:schema_pipeline}
+\end{figure*}
 
 
 \section{Text-to-SQL Service}
@@ -385,6 +377,37 @@ VES Score (\%)   & 83.26 & 64.52  & 73.73  & 74.80 \\
 \end{table}
 
 The pipeline achieves 72.97\% overall execution accuracy. Performance is highest on simple queries (80.65\%) and shows a recovery on challenging queries (69.23\% vs.\ 65.96\% for moderate), suggesting that the multi-agent pipeline's explicit decomposition and error correction mechanisms are particularly effective for complex queries.
+
+\subsection{Schema Generation Quality}
+
+The schema generation service was evaluated by comparing the relations it produces against reference schemas across four dimensions: schema (table) identification, attribute completeness, primary keys, and foreign keys, each scored by F1 and an exact-correctness accuracy.
+
+Predicted and reference identifiers are aligned through layered matching: exact and synonym matching, then embedding similarity, then approximate string matching based on n-gram overlap. We extended this same matching to primary and foreign keys, which previously had to be identical: a key is now credited when its attributes align under the string-level comparison, so semantically equivalent keys that differ only in surface naming are no longer penalized. Table~\ref{tab:schema_eval} reports the results before and after this change; all values are percentages.
+
+% ------------------------------------------------------------------
+% TABLE: Schema Generation Quality
+% ------------------------------------------------------------------
+\begin{table}[htbp]
+\centering
+\caption{Schema generation quality before and after extending primary- and foreign-key matching with approximate string matching.}
+\label{tab:schema_eval}
+\renewcommand{\arraystretch}{1.2}
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{l cc cc cc cc}
+\toprule
+& \multicolumn{2}{c}{\textbf{Schema}} & \multicolumn{2}{c}{\textbf{Attribute}} & \multicolumn{2}{c}{\textbf{Primary key}} & \multicolumn{2}{c}{\textbf{Foreign key}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+\textbf{Method} & F1 & Acc. & F1 & Acc. & F1 & Acc. & F1 & Acc. \\
+\midrule
+Before & 82.37 & 55.55 & 72.73 & 38.52 & \textendash & 59.73 & \textendash & 79.88 \\
+After  & 87.42 & 59.63 & 77.29 & 45.87 & 77.96 & 65.19 & 89.91 & 81.73 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+After the change, every dimension improves, and F1 becomes reportable for the key columns that exact-only matching had left undefined.
 
 \subsection{Provisioning Latency}
 
