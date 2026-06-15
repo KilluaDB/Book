@@ -1,0 +1,14 @@
+\section{Challenges and Limitations}
+\label{sec:7.2_challenges}
+
+While the platform is functional and modular, several system-wide challenges remain:
+
+\begin{itemize}
+   \item \textbf{Service Coordination}: The project spans multiple services, including the backend API, schema-generation AI, Text-to-SQL AI, and Kubernetes resources. Keeping their contracts, environment variables, and deployment assumptions aligned is non-trivial.
+   \item \textbf{Operational Complexity}: Running PostgreSQL, Redis, and operator-managed database instances inside Kubernetes introduces configuration overhead, RBAC requirements, and namespace isolation concerns.
+   \item \textbf{AI Reliability}: The generation services remain sensitive to prompt quality, schema size, and query complexity. Even when outputs are syntactically valid, they can still be semantically wrong or incomplete.
+   \item \textbf{Testing Boundaries}: End-to-end validation is harder than unit testing because many failures only appear when the backend, AI service, database, and cluster configuration all interact together.
+   \item \textbf{Deployment Portability}: The local K3s-based setup is useful for development, but reproducing the same behavior across different environments or cloud platforms requires careful adaptation.
+\end{itemize}
+
+These limitations highlight the need for stronger observability, richer automated testing, and more portable deployment workflows before the platform can be considered production-ready.

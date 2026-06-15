@@ -1,0 +1,8 @@
+\section{Conclusion}
+\label{sec:7.1_conclusion}
+
+This project delivered a complete Database-as-a-Service platform that combines automated database provisioning, AI-assisted schema generation, and a secure Text-to-SQL workflow. Across the book, we described the backend API, the Kubernetes-based deployment model, the AI services used for schema design and SQL generation, and the supporting testing and evaluation strategy that validates the system end to end.
+
+The backend provides multi-tenant database management, request routing, backup and restore, authentication, and integration with the AI services. The schema-generation service turns natural-language requirements into structured database designs, while the Text-to-SQL service supports query understanding, schema selection, SQL generation, review, and refinement. Together, these components form a unified workflow that helps users move from a project idea to a deployed and queryable database environment.
+
+The main contribution of this work is not a single model or endpoint, but the orchestration of several services into a practical platform. By combining containerized deployment, Kubernetes operators, explicit API boundaries, and iterative validation, the system reduces manual database setup effort and improves reliability for real-world usage.

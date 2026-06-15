@@ -1,0 +1,20 @@
+\section{Future Work}
+\label{sec:7.3_future_work}
+
+Several directions can extend the full project:
+
+\begin{itemize}
+   \item \textbf{Unified Workflow Automation}: Add tighter orchestration between schema generation, database provisioning, and query generation so that a single user request can drive the entire lifecycle from design to deployment.
+   \item \textbf{Better Observability}: Expand logging, metrics, and tracing across the backend and AI services so failures can be diagnosed faster in local and cluster deployments.
+   \item \textbf{Stronger End-to-End Validation}: Add more integration tests around database creation, query execution, schema migration, and service-to-service communication.
+   \item \textbf{Smarter AI Assistance}: Improve prompt selection, schema retrieval, and reviewer/refiner behavior so the AI services can handle larger schemas and more complex requirements.
+   \item \textbf{Broader Deployment Targets}: Extend support beyond the local K3s setup to additional Kubernetes environments or managed cloud deployments with minimal configuration changes.
+   \item \textbf{User-Facing Improvements}: Enhance the UI for monitoring generated schemas, reviewing SQL, and tracking deployment status so the platform is easier to operate.
+   \item \textbf{Support for Multi-Region}: Enable the platform to deploy and manage databases across multiple geographic regions to minimize latency and ensure high availability.
+   \item \textbf{Support for Multi-Cloud}: Abstract the underlying infrastructure to allow seamless deployments across various cloud service providers, preventing vendor lock-in.
+   \item \textbf{Distributed Log Tracing}: Implement comprehensive distributed tracing mechanisms across all microservices to improve the debugging and monitoring of complex cross-service requests.
+   \item \textbf{Durable Provisioning Queues:} The current implementation utilizes native Go background goroutines for asynchronous project provisioning to minimize initial infrastructure complexity while achieving non-blocking HTTP behavior. As the platform scales, this will be replaced with a durable, Redis-backed message queue (e.g., Celery or Asynq) to provide fault tolerance, retry mechanisms, and rate limiting during database creation.
+   \item \textbf{Strict Compute Isolation:} The local \texttt{k3s} deployment currently relies on the standard Kubernetes scheduler to bin-pack tenant databases alongside system components. In a production environment, strict physical isolation will be enforced using dedicated "System" and "Tenant" Node Pools, implemented via Kubernetes Taints and Tolerations to prevent noisy-neighbor scenarios.
+\end{itemize}
+
+Pursuing these directions will make the platform more robust, easier to operate, and more suitable for real-world database-as-a-service use.

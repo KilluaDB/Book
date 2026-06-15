@@ -77,6 +77,13 @@ single LLM configuration to process the entire database state, reason through mu
 lines of dialect code, these frameworks assign specialized roles to distinct agents that collaborate via shared memory
 contexts \cite{Multi_Agent_Collaborative_Framework_for_Text_to_SQL, SQLFixAgent_Towards_Semantic_Accurate_Text_to_SQL, Text_to_SQL_in_the_Era_of_LLMs}.
 
+\begin{figure}[H]
+   \centering
+   \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{images/ai/text2SQL.png}
+   \caption{Multi-Agent Pipeline}
+   \label{fig:Multi-Agent Pipeline}
+\end{figure}
+
 \subsubsection{The Schema Linker (Selector Agent)}
 The Selector agent handles the task of schema linking and prompt optimization \cite{Multi_Agent_Collaborative_Framework_for_Text_to_SQL, Text_to_SQL_in_the_Era_of_LLMs}.
 When exposed to real-world industrial environments containing hundreds of tables and thousands of columns, injecting the
