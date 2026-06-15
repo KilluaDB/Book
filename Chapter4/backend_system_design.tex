@@ -1,200 +1,94 @@
 \section{Backend System Design}
 
-The backend is divided into a control plane and a data plane. The control plane exposes the REST API, authenticates users, stores platform metadata, and reconciles project lifecycle state. The data plane contains the tenant database instances, connection routing components, and backup or query execution paths. This separation keeps orchestration logic independent from tenant workload execution and allows each part of the platform to scale with different resource requirements.
+The backend architecture is fundamentally divided into a control plane and a data plane. The control plane operates as the orchestration layer: it exposes the public API, authenticates users, stores platform metadata, and drives the state machine for project lifecycle management. The data plane encapsulates the provisioned tenant database instances, connection routing infrastructure, and the execution paths for queries and backups. This strict separation isolates orchestration logic from tenant workload execution, ensuring that control plane failures do not interrupt active database connections and allowing each plane to scale according to its distinct resource demands.
+
+\subsection{Core Architectural Components}
+
+To realize the separation of concerns between the control plane and the data plane, the system architecture comprises several specialized, highly cohesive components:
+
+\begin{itemize}
+    \item \textbf{Ingress and API Gateway (Traefik)}: Acts as the primary entry point for all external traffic. It handles TLS termination, path-based HTTP routing for the platform API, and TCP/SNI passthrough for direct tenant database connections.
+    \item \textbf{Control Plane API \& Orchestration Worker}: The core backend is split. The API handles synchronous client requests (e.g., authentication, metadata retrieval), while a decoupled orchestration worker consumes asynchronous tasks from a message queue to interact with the Kubernetes API for infrastructure provisioning.
+    \item \textbf{Meta-Database (PostgreSQL) \& Cache (Redis)}: PostgreSQL serves as the persistent source of truth for platform metadata (users, project state, billing tiers), while Redis operates as both a high-throughput message broker for the async workers and a low-latency cache for dynamic connection pooling.
+    \item \textbf{Kubernetes Operators}: The platform relies on the \texttt{CloudNativePG} and \texttt{MongoDB Community} operators to declaratively translate high-level database topologies (e.g., replica sets, storage claims) into low-level Kubernetes primitives (Pods, StatefulSets, PVCs). Additionally, \texttt{cert-manager} is utilized to automate TLS certificate provisioning.
+    \item \textbf{Data Plane Workloads}: This layer houses the isolated tenant namespaces. Each namespace encapsulates the underlying database engine alongside localized sidecars or proxy services, such as \texttt{PostgREST}, which provides automatic REST API generation on top of tenant schemas.
+    \item \textbf{Observability Stack}: A centralized monitoring namespace running Prometheus (for metric scraping), Loki (for log aggregation), and Grafana (for visualization), ensuring comprehensive visibility into both control plane health and tenant database performance.
+\end{itemize}
 
 \subsection{Control Plane Architecture}
 
-The REST API server is the orchestration entry point for all user-facing operations. It is designed around a layered structure that separates transport concerns from domain logic and persistence:
+The control plane is designed around a multi-tiered architecture that explicitly separates transport protocols, business logic, persistence, and infrastructure orchestration. This separation of concerns ensures that the system remains modular and testable.
 
-\begin{itemize}
-    \item \textbf{Handler Layer:} Gin handlers bind and validate HTTP payloads, extract authenticated user and project identifiers, call the appropriate service, and return standardized JSON responses. Engine-specific handlers are separated into PostgreSQL and MongoDB packages so that relational and document workflows can evolve independently.
-    \item \textbf{Service Layer:} Services implement platform workflows such as project creation, asynchronous provisioning, query execution, schema inspection, Text-to-SQL execution, and backup dispatching. This layer owns business rules such as database type normalization, project status transitions, password validation, and resource-tier validation.
-    \item \textbf{Repository Layer:} Repositories isolate platform metadata persistence. The meta-database stores users, projects, resource tiers, runtime status, and timestamps. Redis stores refresh-token state and short-lived workflow data where fast expiration is required.
-    \item \textbf{Infrastructure Layer:} Kubernetes provisioners, DSN resolution, and tenant connection managers live below the service layer. These components interact with external systems such as the Kubernetes API, CloudNativePG, the MongoDB Community Operator, PostgreSQL, MongoDB, Redis, and Prometheus.
-\end{itemize}
+At the edge, the API gateway layer handles request termination, payload validation, and authentication extraction. Beneath it, the workflow service layer implements the core platform business rules. This layer is responsible for translating user intents—such as provisioning requests or schema generation—into actionable operations, enforcing resource-tier limits, validating credentials, and managing state transitions. 
 
-The backend avoids an ORM for tenant database operations. SQL operations use the PostgreSQL wire protocol through \texttt{pgx}, while MongoDB operations use the official driver. This keeps query behavior explicit and avoids hiding database-specific behavior behind a generic abstraction.
+Data persistence for the control plane relies on a dedicated meta-database for canonical state and an in-memory datastore for ephemeral data such as session tokens and transient workflow states. Finally, the infrastructure orchestration layer acts as the bridge between the control plane and the underlying container orchestrator, abstracting the complexities of interacting with database operators, networking rules, and secret management. 
 
-\subsection{Database Engine Selection Rationale}
+By avoiding tight coupling between the application logic and the tenant databases (e.g., bypassing rigid Object-Relational Mappers for tenant queries), the system preserves the native execution semantics of the underlying engines, ensuring that complex queries and document aggregations are passed through faithfully.
 
-The platform intentionally supports two database engines rather than forcing every project into a single data model. This is a polyglot persistence decision: PostgreSQL is used for relational workloads that need strong structure and transactional guarantees, while MongoDB is used for document workloads that need flexible schemas and nested data.
+\subsection{Polyglot Persistence Strategy}
 
-\subsubsection*{Why PostgreSQL}
+The platform embraces polyglot persistence by intentionally supporting multiple database engines. Rather than forcing diverse application models into a single storage paradigm, the architecture offers engines tailored to specific data structures and access patterns.
 
-PostgreSQL was selected as the relational database engine for both the platform meta-database and tenant SQL projects, explicitly chosen over alternatives like MySQL or MariaDB. While MySQL is a highly capable engine, PostgreSQL offers several critical advantages that make it superior for a modern Database-as-a-Service platform. 
+\subsubsection*{Relational Engine Selection}
 
-For the meta-database, the platform needs strong consistency for users, projects, statuses, resource tiers, ownership relationships, and audit-relevant timestamps. PostgreSQL fits this requirement because it provides strict ACID transactions, foreign keys, unique constraints, typed columns, and predictable SQL semantics.
+PostgreSQL was selected as the foundational relational engine for both the platform's internal meta-database and tenant workloads. For the control plane, strong ACID (Atomicity, Consistency, Isolation, Durability) guarantees, strict relational integrity, and robust transaction management are critical for maintaining the canonical state of users, projects, and billing tiers. 
 
-For tenant databases, PostgreSQL provides several distinct technical advantages over competitors:
+For tenant workloads, PostgreSQL offers significant advantages over alternatives like MySQL. It provides comprehensive support for advanced SQL features, including complex window functions, common table expressions, and rich indexing strategies. Furthermore, its highly optimized JSONB capabilities allow developers to store and query semi-structured data efficiently without leaving the relational ecosystem. The maturity of its operator ecosystem in Kubernetes ensures that declarative provisioning, scaling, and high availability can be achieved reliably. Additionally, PostgreSQL's compatibility with automatic REST API generators enables rapid frontend development by exposing relational tables directly over HTTP.
 
-\begin{itemize}
-    \item \textbf{Relational Integrity \& Advanced SQL:} Foreign keys, constraints, indexes, and transactions are first-class features. Furthermore, PostgreSQL supports advanced SQL features such as common table expressions, complex window functions, and rich indexing more comprehensively than MySQL. This makes it suitable for complex applications like finance, analytics, and booking systems.
-    \item \textbf{Extensibility:} Extensions such as \texttt{pg\_stat\_statements} allow the platform to expose query-history and performance information without building a separate query-log system. PostgreSQL also has a much more mature extension ecosystem compared to other open-source relational databases.
-    \item \textbf{Superior JSON/JSONB Capabilities:} PostgreSQL's highly optimized JSONB support enables developers to handle semi-structured data within a relational context more efficiently than MySQL's JSON implementation, giving tenants the flexibility of document storage without leaving the relational engine.
-    \item \textbf{Kubernetes Operator Maturity:} CloudNativePG is one of the most mature and robust operators available for Kubernetes. It provides a declarative way to provision PostgreSQL clusters, manage readiness, expose status, and integrate with Kubernetes storage and Secrets far more reliably than current MySQL operator alternatives.
-    \item \textbf{HTTP API Compatibility:} PostgreSQL integrates seamlessly with PostgREST to expose a REST interface over relational tables. There is no equivalently mature and widely adopted ecosystem for MySQL, making PostgreSQL the best fit for the platform's goal of enabling rapid frontend development.
-\end{itemize}
+\subsubsection*{Document Engine Selection}
 
-PostgreSQL is therefore the default choice when the application has a known schema, requires strong consistency, or benefits from advanced SQL querying.
+MongoDB was integrated to serve as the document-oriented database engine. Many modern applications—particularly those in the prototyping phase or dealing with naturally nested, polymorphic data—benefit from schema flexibility. Forcing these models into normalized relational tables often introduces unnecessary friction and migration overhead.
 
-\subsubsection*{Why MongoDB}
+MongoDB excels in these scenarios by providing highly expressive querying, aggregation, and indexing capabilities over deeply nested BSON documents. This structure maps perfectly to the JSON objects consumed by modern web and mobile clients, eliminating the impedance mismatch between the application layer and the persistence layer. Like PostgreSQL, MongoDB is supported by a mature Kubernetes operator ecosystem, allowing the platform to reuse the same declarative provisioning and namespace isolation patterns across both engines.
 
-MongoDB was selected as the document database engine, standing out against competitors like Couchbase, Cassandra, or document-oriented cloud solutions. Not every project starts with a stable relational schema; some applications evolve quickly and store naturally nested data. For these cases, forcing users to model every structure as normalized relational tables can slow development and increase migration overhead.
+Ultimately, providing both engines ensures the platform is broadly applicable. Users are empowered to select the storage paradigm that best aligns with their application's domain logic rather than compromising their architecture to fit the database.
 
-MongoDB provides several key advantages over alternative NoSQL data stores for this platform:
+\subsection{Control Plane Data Model}
 
-\begin{itemize}
-    \item \textbf{Rich Querying on Nested Documents:} Unlike wide-column stores like Cassandra or pure key-value stores, MongoDB offers highly expressive querying, aggregation, and indexing capabilities on deeply nested BSON documents. This enables complex data retrieval without sacrificing the flexibility of a document model.
-    \item \textbf{Industry Standard Driver Ecosystem:} MongoDB has a massive community and officially supported, highly mature drivers (especially in Go). The Go backend can translate collection and document operations directly and efficiently without needing an intermediary sidecar.
-    \item \textbf{Natural JSON Mapping:} MongoDB's BSON document model maps perfectly to the JSON objects used by web and mobile clients. This eliminates the impedance mismatch for frontend-driven applications, allowing seamless data flow from the client to the database.
-    \item \textbf{Flexible Schema for Rapid Iteration:} Collections can store documents with different shapes. This is invaluable for prototypes, content management systems, dynamic forms, and rapidly changing application models where defining strict schemas upfront would be a bottleneck.
-    \item \textbf{Operator-Based Provisioning:} The MongoDB Community Operator is exceptionally robust, allowing the exact same Kubernetes-native provisioning pattern used for PostgreSQL: custom resources, Secrets, Services, readiness status, and namespace isolation. This operational consistency makes maintaining the DBaaS platform significantly easier than adopting NoSQL databases with less mature Kubernetes tooling.
-\end{itemize}
+The canonical state of the platform is maintained in the control plane's meta-database. The schema is intentionally minimized; rather than duplicating tenant database topologies, the meta-database acts as a directory, while the source of truth for database topology remains with the Kubernetes operators.
 
-MongoDB is therefore the preferred choice when the project needs flexible document storage, nested data, and fast iteration without frequent relational migrations.
+The core Entity-Relationship model centers on two primary entities: \textbf{Users} and \textbf{Projects}. The Users entity stores authentication credentials, roles, and status flags. The Projects entity maintains a many-to-one relationship with Users (a user may own multiple projects). A Project record encapsulates the requested database engine type, the assigned resource tier, and the current lifecycle status (e.g., creating, running, failed). 
 
-\subsubsection*{Why Both Engines Are Needed}
+Crucially, the meta-database does not store raw connection strings or tenant database credentials. Instead, it relies on deterministic naming conventions and the Kubernetes Secrets API to dynamically resolve connection parameters at runtime, significantly reducing the security risk associated with centralized credential storage.
 
-The two engines serve different tenant needs. PostgreSQL provides strong relational guarantees and SQL tooling; MongoDB provides flexible document storage and a JSON-native development model. Supporting both engines makes the DBaaS platform more generally useful: users can choose the database model that matches their application instead of adapting every application to one storage paradigm.
+\subsection{Asynchronous Provisioning State Machine}
 
-\subsection{Platform Data Model}
+Infrastructure provisioning in a containerized environment can take several minutes as volumes are bound, pods are scheduled, and databases are bootstrapped. To prevent long-lived HTTP connections from blocking the API layer, the provisioning workflow is modeled as an asynchronous state machine.
 
-The platform's canonical state is stored in the meta-database. The schema is intentionally small because the tenant databases themselves are provisioned and described by Kubernetes resources rather than duplicated in the platform database.
+When a user requests a new database, the system performs optimistic validation of the request payload and resource tier. If valid, the project is registered in the meta-database with a \textit{creating} state, immediately returning a stable identifier to the client. The API gateway then enqueues a provisioning task into an in-memory message broker (Redis), decoupling the request ingestion from its execution.
 
-\subsubsection*{Enumerated Types}
-\begin{verbatim}
-CREATE TYPE db_type_t AS ENUM (
-    'postgresql', 'mongodb'
-);
+A decoupled background orchestration worker consumes these tasks and sequentially drives the infrastructure state: it creates a mathematically deterministic namespace for isolation, injects cryptographic secrets, and submits the declarative Custom Resources to the respective database operators. The worker then enters a polling loop, waiting for the operator to report readiness. Upon successful deployment, the project transitions to a \textit{running} state. If the orchestration process times out or encounters an unrecoverable failure, the infrastructure is rolled back, and the project transitions to a \textit{failed} state. This event-driven, eventual consistency model requires the client to poll the project status but ensures the control plane API remains highly responsive under heavy provisioning loads.
 
-CREATE TYPE instance_status_t AS ENUM (
-    'creating', 'running', 'failed', 'paused', 'deleted'
-);
+\subsection{Resource Tiering and Enforcement}
 
-CREATE TYPE resource_tier_t AS ENUM (
-    'free', 'basic', 'premium'
-);
-\end{verbatim}
+Tenant databases are strictly constrained by resource tiers. These tiers define the maximum allowable CPU cores, memory limits, and persistent storage capacity. During the provisioning state machine's execution, these limits are translated directly into Kubernetes resource quotas and persistent volume claims. 
 
-\subsubsection*{Users Entity}
-\begin{verbatim}
-CREATE TABLE IF NOT EXISTS users (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'user',
-  status TEXT NOT NULL DEFAULT 'active',
-  deleted_at TIMESTAMP WITH TIME ZONE,
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-  last_login_at TIMESTAMP WITH TIME ZONE
-);
-\end{verbatim}
+To further mitigate ``noisy-neighbor'' problems and protect the control plane, the infrastructure leverages compute isolation via Kubernetes Node Pools. Control plane components, API gateways, and system operators are pinned to a dedicated System Node Pool. In contrast, tenant workloads are scheduled exclusively on a distinct Tenant Node Pool using node taints and tolerations. This physical segregation ensures that an unconstrained, compute-intensive query running on a tenant database cannot starve the cluster's critical management services of CPU or memory resources, enforcing constraints at both the orchestration and hardware levels.
 
-\subsubsection*{Projects Entity}
-\begin{verbatim}
-CREATE TABLE IF NOT EXISTS projects (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  description TEXT,
-  db_type db_type_t NOT NULL,
-  resource_tier resource_tier_t NOT NULL DEFAULT 'free',
-  status instance_status_t NOT NULL DEFAULT 'creating',
-  runtime_created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-  runtime_updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
-\end{verbatim}
+\subsection{Data Plane Network Routing}
 
-The meta-database stores project ownership and lifecycle state, but it does not persist tenant database DSNs. Connection information is reconstructed from Kubernetes Secrets when the backend needs to reach a tenant database.
+The platform is designed to support two distinct data access patterns: programmatic access via the REST API and direct access via standard database client tools. 
 
-\subsection{Asynchronous Database Provisioning Design}
+For direct relational database access, the system employs a dedicated Transport Layer Security (TLS) routing proxy. Instead of terminating the TLS connection—which would disrupt the database's native authentication protocols and channel-binding mechanisms—the proxy inspects the unencrypted Server Name Indication (SNI) extension in the initial TLS \texttt{ClientHello} packet. It extracts the unique project identifier from the SNI hostname and dynamically routes the TCP byte stream to the appropriate isolated namespace. This design ensures that encryption and authentication remain strictly end-to-end between the user's local client and the tenant database.
 
-Provisioning is designed as an asynchronous state machine. The API must return quickly enough for frontend workflows and load balancers, while the database operators may need several minutes to create pods, volumes, services, and credentials. For that reason, project creation and infrastructure provisioning are deliberately separated.
+Document database routing follows a similar principle, utilizing ingress controllers configured for TCP TLS passthrough to direct traffic safely into the correct namespace.
 
-\begin{enumerate}
-    \item \textbf{Request Validation:} The handler validates the request payload. The service normalizes the database type, validates the tenant database password, and validates the selected resource tier.
-    \item \textbf{Optimistic Registration:} The project is inserted into the meta-database with status \texttt{creating}. This gives the frontend a stable project identifier immediately.
-    \item \textbf{Background Provisioning:} A background goroutine calls the Kubernetes provisioner with a bounded context. The HTTP request does not wait for database readiness.
-    \item \textbf{Namespace Creation:} The provisioner creates a deterministic namespace for the project: \texttt{pg-<uuid>} for PostgreSQL or \texttt{mongo-<uuid>} for MongoDB.
-    \item \textbf{Secret Injection:} The tenant password is written to a Kubernetes \texttt{Secret}. Operators consume that Secret during database bootstrap.
-    \item \textbf{CRD Application:} The provisioner creates the appropriate Custom Resource: a CloudNativePG \texttt{Cluster} for PostgreSQL or a MongoDB Community \texttt{MongoDBCommunity} resource for MongoDB.
-    \item \textbf{Readiness Polling:} The provisioner polls the custom resource status every few seconds, up to the configured timeout. PostgreSQL readiness is derived from \texttt{status.readyInstances}; MongoDB readiness is derived from the resource phase.
-    \item \textbf{Status Reconciliation:} On success, the project status becomes \texttt{running}. On timeout or provisioning failure, the namespace is deleted and the project status becomes \texttt{failed}.
-\end{enumerate}
+\subsection{Dynamic Connection Pooling}
 
-This asynchronous model avoids holding an HTTP connection open while Kubernetes performs slow reconciliation. The tradeoff is that the frontend must treat project creation as an eventually consistent workflow and poll or reload project status until the instance is ready.
+To manage connections to thousands of potential tenant databases efficiently, the backend employs a Just-In-Time (JIT) connection pooling strategy. Establishing database connections is computationally expensive. Therefore, the control plane caches connection pools in memory, keyed by the project identifier.
 
-\subsection{PostgreSQL and MongoDB Provisioning Differences}
+When a query is dispatched, the system attempts to acquire an active pool. The pool configuration is highly conservative, utilizing a minimal baseline connection count and a strict upper limit to prevent connection exhaustion at the database layer. Before a cached pool is returned, the system verifies its liveness and checks for connection parameter rotations. A background reclamation process periodically identifies and evicts pools that have remained idle, freeing resources on both the control plane and the tenant databases while ensuring low-latency access for active projects.
 
-Both engines use the same project lifecycle states, but their Kubernetes resources differ:
+\subsection{AI Delegation and Query Validation}
 
-\begin{itemize}
-    \item \textbf{PostgreSQL:} Each relational project is provisioned as a CloudNativePG \texttt{Cluster}. The provisioner configures resource requests, storage size, \texttt{pg\_stat\_statements}, and an application database named \texttt{app}. After the database becomes ready, the backend can also deploy PostgREST resources in the project namespace.
-    \item \textbf{MongoDB:} Each document project is provisioned as a \texttt{MongoDBCommunity} replica set with SCRAM authentication. The provisioner creates the ServiceAccount and RoleBinding resources required by the MongoDB operator for the project namespace.
-    \item \textbf{Namespace Isolation:} PostgreSQL and MongoDB instances are isolated in per-project namespaces. Deleting a project namespace cascades deletion to the contained database resources, Secrets, Services, PersistentVolumeClaims, and routing resources.
-\end{itemize}
+The integration of artificial intelligence for schema generation and natural language query synthesis (Text-to-SQL) is treated as a delegated capability. The core system does not embed large language models directly; instead, it acts as a secure intermediary. The backend constructs the appropriate prompt context, dispatches it to external AI services, and streams the generated artifacts back to the client.
 
-\subsection{Resource Tier Design}
+Crucially, AI-generated artifacts are treated as untrusted input. Generated Data Definition Language (DDL) is cached as a pending proposal and requires explicit user approval before execution. Similarly, generated SQL queries pass through an application-level query safety validator. This validator enforces security constraints, blocking high-risk operations such as schema truncation or unguarded deletion statements. While this is not a complete cryptographic sandbox, it provides a critical layer of defense against accidental or hallucinated destructive commands.
 
-Resource tiers constrain tenant databases through Kubernetes requests, limits, and storage settings generated by the provisioner.
+\subsection{Disaster Recovery and Continuous Archiving}
 
-\begin{table}[H]
-    \centering
-    \renewcommand{\arraystretch}{1.3}
-    \begin{tabular}{|l|l|l|l|}
-    \hline
-    \textbf{Tier} & \textbf{CPU} & \textbf{Memory} & \textbf{Storage} \\
-    \hline
-    \texttt{free} & 0.5 cores & 512 MiB & 5 GiB \\
-    \hline
-    \texttt{basic} & 1.0 cores & 1024 MiB & 10 GiB \\
-    \hline
-    \texttt{premium} & 2.0 cores & 2048 MiB & 20 GiB \\
-    \hline
-    \end{tabular}
-    \caption{Project Resource Tier Limits}
-    \label{tab:resource_tiers}
-\end{table}
+Data durability and disaster recovery are foundational to the platform's architecture. Instead of relying solely on periodic manual dumps, the system implements continuous Point-in-Time Recovery (PITR) mechanisms. For PostgreSQL workloads, the CloudNativePG operator is configured to continuously archive Write-Ahead Logs (WAL) to an external S3-compatible object storage bucket. Similarly, MongoDB instances offload scheduled snapshots to object storage. This decoupling of storage ensures that even in the event of catastrophic node failure or complete loss of the Kubernetes persistent volumes, tenant databases can be fully reconstructed up to the last committed transaction without impacting the cluster's local storage capacity.
 
-The selected tier is validated before the project record is created. This prevents invalid platform state and ensures failed validation does not leave a project row without infrastructure.
+\subsection{Streaming Export and Restore Pipelines}
 
-\subsection{Data Plane Routing Design}
-
-The platform supports two access patterns. The primary path is through the authenticated REST API, where the backend resolves the tenant database connection and executes operations on behalf of the user. The secondary path supports direct database clients such as DBeaver or MongoDB Compass when external access is configured.
-
-For PostgreSQL, direct external access is routed through a dedicated \texttt{pgproxy} process. The proxy accepts TCP connections, inspects the TLS Server Name Indication (SNI) when available, and maps the requested hostname to the deterministic project namespace and service name. The proxy does not terminate TLS, so database authentication and encryption remain end-to-end between the client and PostgreSQL server.
-
-When external access is configured, the project access endpoint also returns PostgREST connection metadata: \texttt{postgrest\_url}, \texttt{api\_key}, and \texttt{jwt\_secret}. These fields allow clients to call a tenant-scoped HTTP API over relational tables without using the platform query editor.
-
-For MongoDB, the provisioner creates per-project Traefik \texttt{IngressRouteTCP} resources with TLS passthrough. This keeps MongoDB direct access independent from PostgreSQL's proxy-based routing model.
-
-\subsection{Connection Pool Design}
-
-The backend uses just-in-time tenant connection managers. Connection pools are cached by project identifier and recreated only when required.
-
-For PostgreSQL, each cached pool is configured with conservative limits: a small maximum connection count, a minimum warm connection, finite connection lifetime, finite idle time, and direct query execution mode. Before a cached pool is returned, the manager checks whether the resolved DSN has changed and verifies liveness with a short ping timeout. If the DSN changed or the ping fails, the stale pool is removed and a new pool is created.
-
-A background maintenance task periodically emits pool metrics and evicts pools whose connection count has dropped to zero. This reduces idle resource usage while preserving low latency for active projects.
-
-\subsection{AI-Assisted Database Operations}
-
-The backend integrates with external AI services rather than embedding model orchestration directly inside the Go process.
-
-\subsubsection*{Schema Generation}
-Schema generation is exposed through PostgreSQL schema endpoints. The backend validates the authenticated user and project, forwards the natural-language request to the configured schema AI service through \texttt{SCHEMA\_AI\_BASE\_URL}, and either streams Server-Sent Events (SSE) frames back to the frontend or returns a complete JSON response. The model name is forwarded as part of the request payload. Provider selection, prompt orchestration, and model-key management belong to the external AI service, not to the Go backend.
-
-Generated DDL is not applied immediately. The backend caches pending schema suggestions in Redis under a project-scoped key (\texttt{pending\_schema:<project-id>}) with a one-hour TTL. The user must explicitly approve the suggestion through a separate endpoint before the DDL is executed against the tenant database. This approval step prevents autonomous schema mutation by the AI service.
-
-\subsubsection*{Text-to-SQL}
-The Text-to-SQL feature is configured through the \texttt{TEXT\_TO\_SQL} service URL. The Go backend resolves the tenant database connection, sends the natural-language question and database connection information to the external service, receives a generated SQL statement, and executes it through the normal query service. This design centralizes final execution control in the Go backend, so generated SQL still passes through the same validation and execution path as user-submitted SQL.
-
-\subsection{Query Safety Design}
-
-User-submitted and AI-generated SQL is treated as untrusted input. Before execution, the query service applies validation rules that reject multi-statement input and block high-risk operations such as database or schema creation/deletion, truncation, and unguarded \texttt{DELETE FROM} statements (those without a \texttt{WHERE} clause). The server wires a configurable maximum result size (\texttt{maxPostgresQueryLimit = 50}) for future enforcement; the current validator focuses on statement safety rather than row-count caps. This validation is not a complete SQL sandbox, but it provides an application-level guardrail around the query editor and Text-to-SQL workflow.
-
-\subsection{Backup and Restore Design}
-
-Backup and restore are implemented as streaming workflows where possible. PostgreSQL exports use \texttt{pg\_dump}; MongoDB exports use \texttt{mongodump}. The backend streams process output to the HTTP response so large exports do not need to be materialized in application memory.
-
-Plain PostgreSQL SQL restores and MongoDB restores stream the request body into the corresponding restore process. PostgreSQL custom-format restores are an exception: the backend first writes the uploaded archive to a temporary file because \texttt{pg\_restore} needs a seekable archive to inspect and filter its table of contents. Therefore, the disaster-recovery design is stream-oriented, but not entirely zero-disk for every restore format.
+In addition to continuous disaster recovery, the architecture optimizes manual data export and restore operations through streaming data pipelines rather than relying entirely on localized disk materialization. For export operations, the backend spawns the native database dumping utilities and pipes their standard output directly into the HTTP response stream. This approach ensures that the control plane's memory and storage are not overwhelmed when exporting gigabytes of data. Import operations function in reverse, streaming the uploaded payload directly into the restoration process. This streaming design is essential for maintaining a stateless, horizontally scalable API tier.

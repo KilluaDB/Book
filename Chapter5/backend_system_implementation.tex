@@ -95,7 +95,9 @@ After validation, the service inserts a project row into the meta-database. The 
     \item On failure, the status is updated to \texttt{failed}.
 \end{enumerate}
 
-This implementation avoids HTTP gateway timeouts during database creation. It also makes the frontend responsible for displaying and refreshing project status while the Kubernetes operators reconcile the requested resources.
+This implementation avoids HTTP gateway timeouts during database creation. It also makes the frontend responsible for displaying and refreshing project status while the Kubernetes operators reconcile the requested resources. 
+
+\textbf{Design vs. Implementation Note:} While the system architecture in Chapter~\ref{chap:system_design} outlines a dedicated Redis-backed message queue for processing provisioning tasks, the current MVP implementation utilizes native Go background goroutines. This pragmatic approach was chosen to minimize initial infrastructure complexity while still achieving the necessary asynchronous, non-blocking HTTP behavior. As the platform scales, replacing this goroutine with a durable queue (e.g., Celery or Asynq) is a planned evolution.
 
 \subsection{Operator Provisioner Implementation}
 
@@ -203,7 +205,41 @@ Backup errors are passed through credential-redaction logic before they are retu
 
 HTTP middleware tracks API request counts and durations for application endpoints, bypassing health checks to reduce noise. Provisioning metrics record instance creation, deletion, current instance counts, readiness wait duration, and non-fatal sub-resource failures such as PostgREST or ingress creation errors.
 
-The provisioner also runs a periodic collector that lists database custom resources and reconciles instance gauges. Connection managers emit \texttt{backend\_pg\_pool\_*} and \texttt{backend\_mongo\_*} gauges for pool counts, acquired and idle connections, and ping latency histograms.
+The provisioner also runs a periodic collector that lists database custom resources and reconciles instance gauges. Connection managers emit \texttt{backend\_pg\_pool\_*} and \texttt{backend\_mongo\_*} gauges for pool counts, acquired and idle connections, and ping latency histograms. 
+
+To provide comprehensive visibility into the platform's operation, the system ships with four pre-configured Grafana dashboards.
+
+\textbf{KilluaDB Unified Platform Dashboard:} Tracks core DBaaS orchestration metrics, including asynchronous provisioning latency (p95), instance lifecycle rates, provisioning errors, meta-database connection pool saturation, and individual tenant database health (e.g., CloudNativePG WAL records and MongoDB active connections).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{images/observability/killuadb_unified_platform_dashboard.png}
+    \caption{KilluaDB Unified Platform Dashboard}
+\end{figure}
+
+\textbf{KilluaDB API Monitoring:} Tracks the REST API gateway health. It visualizes request throughput, error rate percentages, and endpoint latency trends to ensure the control plane remains responsive to frontend requests.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{images/observability/killuadb_api_monitoring.png}
+    \caption{KilluaDB API Monitoring}
+\end{figure}
+
+\textbf{Kubernetes Global View:} Monitors the underlying container orchestration infrastructure. It tracks cluster-wide CPU and memory saturation, pod restart rates, OOM (Out-of-Memory) events, and node-level network bandwidth to ensure physical limits are not exceeded.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{images/observability/kubernetes___views___global.png}
+    \caption{Kubernetes Global View}
+\end{figure}
+
+\textbf{Go Application Metrics:} Tracks the internal runtime performance of the Go backend process. It monitors heap memory allocations, garbage collection (GC) duration quantiles, and active goroutine counts to detect potential memory leaks or concurrency bottlenecks.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{images/observability/go_metrics.png}
+    \caption{Go Application Metrics}
+\end{figure}
 
 \subsection{Shutdown Behavior}
 
@@ -277,7 +313,9 @@ The meta-database connection pool is configured with \texttt{MinConns=5} and \te
 
 \subsubsection{Data-Plane Scheduling Across Worker Nodes}
 
-Tenant workloads are scheduled independently of the API tier. When worker nodes are added to the cluster, the Kubernetes scheduler places each CloudNativePG or MongoDB Community pod according to resource \texttt{requests} and \texttt{limits} from the selected tier (Table~\ref{tab:resource_tiers} in Chapter~\ref{chap:system_design}). A free-tier PostgreSQL project requests 0.5 CPU and 512 MiB memory; the scheduler bin-packs many such pods onto available workers until a node reaches allocatable capacity.
+Tenant workloads are scheduled independently of the API tier. When worker nodes are added to the cluster, the Kubernetes scheduler places each CloudNativePG or MongoDB Community pod according to resource \texttt{requests} and \texttt{limits} from the selected tier. A free-tier PostgreSQL project requests 0.5 CPU and 512 MiB memory; the scheduler bin-packs many such pods onto available workers until a node reaches allocatable capacity.
+
+\textbf{Design vs. Implementation Note:} The ideal platform architecture (detailed in Chapter~\ref{chap:system_design}) defines strict physical isolation using "System" and "Tenant" Node Pools enforced via Kubernetes Taints and Tolerations. However, to facilitate local demonstration and testing within a constrained \texttt{k3d} environment, the current implementation relies on the standard Kubernetes scheduler to bin-pack pods without explicit taints. This ensures the cluster remains easily reproducible locally, with the understanding that a production deployment will enforce the designed node-level isolation to prevent "noisy neighbor" scenarios.
 
 Each tenant namespace (\texttt{pg-<uuid>}, \texttt{mongo-<uuid>}) contains:
 
