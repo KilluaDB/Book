@@ -228,13 +228,21 @@ The platform follows a control-plane/data-plane separation. The control plane ha
 % ------------------------------------------------------------------
 % FIGURE PLACEHOLDER: High-Level Architecture
 % ------------------------------------------------------------------
-\begin{figure*}[t]
-\centering
-% TODO: Replace with your system architecture diagram
-\includegraphics[width=0.82\textwidth]{architecture.jpg}
-\caption{High-level system architecture showing the control plane, data plane, AI services, and client interfaces.}
-\label{fig:architecture}
-\end{figure*}
+% \begin{figure*}[t]
+% \centering
+% % TODO: Replace with your system architecture diagram
+% \includegraphics[width=0.82\textwidth]{architecture.jpg}
+% \caption{High-level system architecture showing the control plane, data plane, AI services, and client interfaces.}
+% \label{fig:architecture}
+% \end{figure*}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{architecture.jpg}
+    \caption{High-level system architecture showing the control plane, data plane, AI services, and client interfaces.}
+    \caption{architecture}
+    \label{fig:architecture}
+\end{figure}
 
 \subsection{Control Plane}
 
@@ -299,6 +307,12 @@ Report & Compiles all stages into a structured document. \\
 }
 \end{table}
 
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\linewidth,height=0.9\textheight,keepaspectratio]{schema_architecture.pdf}
+    \caption{Multi-agent schema generation architecture.}
+    \label{fig:schema_pipeline}
+\end{figure}
 \subsection{Coordination and Feedback Loops}
 
 Two feedback loops provide self-correcting behavior. The \textit{inner loop} iterates between the conceptual designer and reviewer until the reviewer signals approval, applying fixed validation procedures. The \textit{outer loop} runs QA-generated test cases against the schema; failures are routed back to the responsible design stage. Both loops are bounded by a maximum iteration count.
@@ -310,17 +324,6 @@ The most error-prone parts of logical design---key discovery and normalization--
 \subsection{Domain-Aware Retrieval}
 
 The service includes a curated knowledge base covering six application domains (healthcare, e-commerce, finance, education, logistics, and human resources). When a requirement arrives, the service infers its domain and makes relevant entity patterns, relationship conventions, and type mappings available to the agents via retrieval-augmented tools. Embeddings use the \texttt{all-MiniLM-L6-v2} sentence transformer with cosine similarity search.
-
-% ------------------------------------------------------------------
-% FIGURE: Schema Generation Architecture
-% ------------------------------------------------------------------
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.92\textwidth]{schema_architecture.pdf}
-\caption{Multi-agent schema generation architecture.}
-\label{fig:schema_pipeline}
-\end{figure*}
-
 
 \section{Text-to-SQL Service}
 \fontsize{11}{13}\selectfont

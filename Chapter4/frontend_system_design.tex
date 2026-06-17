@@ -25,7 +25,7 @@ To achieve a robust user experience, the frontend implements specialized compone
     \item \textbf{High-Performance Data Tables:} The UI employs a virtualized table implementation to render database records. This approach ensures that even with large datasets, the UI remains responsive by rendering only the visible subset of data (server-side pagination).
     \item \textbf{Reactive Telemetry Dashboard:} The dashboard utilizes stream-based charting components. By decoupling telemetry data fetching from UI rendering, the system provides real-time performance insights without blocking the main event loop.
 \end{itemize}
-\subsection{Frontend Interaction & Data Flow}
+\subsection{Frontend Interaction \& Data Flow}
 The interaction model is designed to ensure both security and responsiveness:
 \begin{itemize}
   \item \textbf{Authentication Flow:} Every interaction with the backend is guarded by an authentication layer. JWT tokens are securely stored and injected into the \textit{Authorization} header of every \texttt{http} request, ensuring all API calls are authenticated automatically and consistently.
